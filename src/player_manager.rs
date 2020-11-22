@@ -1,19 +1,19 @@
 use std::collections::HashMap;
 use tokio::sync::oneshot;
-use rand::Rng;
-use futures::{Future, FutureExt};
+use futures::future::{select_all, Future, FutureExt, FusedFuture};
 use std::pin::Pin;
 use futures::task::{Context, Poll};
 use tokio::time::Duration;
+use std::sync::Arc;
+use serde::{Serialize, Deserialize};
 
-use crate::connection_table::{Token, Message, ConnectionTableHandle, ConnectionManager};
+use crate::connection_table::{Token, ConnectionTableHandle};
 use crate::player_supervisor::{PlayerSupervisor, SupervisorMsg, SupervisorRequest};
 
 pub struct PlayerManager {
     conn_mgr: ConnectionManager,
     request_table: HashMap<(u32, u32), RequestHandle>,
     players: HashMap<u32, PlayerData>,
-    conn_player: HashMap<Token, u32>,
 
     // todo: remove pub
     pub connection_table: ConnectionTableHandle,
@@ -22,28 +22,24 @@ pub struct PlayerManager {
 impl PlayerManager {
     pub fn new(connection_table: ConnectionTableHandle) -> Self {
         PlayerManager {
-            conn_mgr: ConnectionManager::new(connection_table.clone()),
+            conn_mgr: ConnectionManager::new(),
             request_table: HashMap::new(),
             players: HashMap::new(),
-            conn_player: HashMap::new(),
 
             connection_table,
         }
     }
     pub fn create_player(&mut self, player_id: u32, token: Token) {
-        let supervisor_token = rand::thread_rng().gen();
-        self.conn_mgr.create_connection(supervisor_token);
+        let remote = self.conn_mgr.create_connection(player_id);
         PlayerSupervisor::create(
             self.connection_table.clone(),
-            supervisor_token,
+            remote,
             token
         ).run();
 
         self.players.insert(player_id, PlayerData {
-            supervisor_token,
             msg_ctr: 0,
         });
-        self.conn_player.insert(supervisor_token, player_id);
     }
 
     pub fn request(&mut self,
@@ -61,14 +57,13 @@ impl PlayerManager {
             timeout
         };
 
-        self.conn_mgr.emit(player.supervisor_token, &req);
+        self.conn_mgr.send(player_id, &req);
         player.msg_ctr += 1;
         return Request { rx };
     }
 
-    fn receive(&mut self, msg: Message) {
-        let &player_id = self.conn_player.get(&msg.conn_token).unwrap();
-        let resp: SupervisorMsg = bincode::deserialize(&msg.payload).unwrap();
+    fn receive(&mut self, player_id: u32, data: Arc<Vec<u8>>) {
+        let resp: SupervisorMsg = bincode::deserialize(&data).unwrap();
         
         let (request_id, value) = match resp {
             SupervisorMsg::Response { request_id, content } => {
@@ -91,13 +86,12 @@ impl PlayerManager {
     }
 
     pub async fn step(&mut self) {
-        let msg = self.conn_mgr.recv().await;
-        self.receive(msg);
+        let (player_id, data) = self.conn_mgr.recv().await;
+        self.receive(player_id, data);
     }
 }
 
 struct PlayerData {
-    supervisor_token: Token,
     msg_ctr: u32,
 }
 
@@ -123,3 +117,71 @@ pub enum RequestError {
 }
 
 pub type RequestResult<T> = Result<T, RequestError>;
+
+use crate::msg_stream::{msg_stream, MsgStreamReader, MsgStreamHandle};
+
+pub struct Connection {
+    pub tx: MsgStreamHandle,
+    pub rx: MsgStreamReader,
+}
+
+impl Connection {
+    pub fn emit<T>(&mut self, message: T)
+        where T: Serialize
+    {
+        let encoded = bincode::serialize(&message).unwrap();
+        self.tx.write(encoded);
+    }
+
+    pub fn recv<'a, T>(&'a mut self) -> impl FusedFuture<Output=T> + 'a
+        where T: for<'b> Deserialize<'b>
+    {
+        self.rx.recv().map(|data| {
+            bincode::deserialize(&data).unwrap()
+        })
+    }
+}
+
+impl Connection {
+    pub fn create() -> (Self, Self) {
+        let tx1 = msg_stream();
+        let rx1 = tx1.reader(0);
+        let tx2 = msg_stream();
+        let rx2 = tx2.reader(0);
+        let conn1 = Connection { rx: rx1, tx: tx2};
+        let conn2 = Connection { rx: rx2, tx: tx1};
+        return (conn1, conn2);
+    }
+}
+
+pub struct ConnectionManager {
+    connections: HashMap<u32, Connection>,
+}
+
+impl ConnectionManager {
+    pub fn new() -> Self {
+        ConnectionManager { connections: HashMap::new() }
+    }
+
+    pub fn create_connection(&mut self, key: u32) -> Connection {
+        let (local, remote) = Connection::create();
+        self.connections.insert(key, local);
+        return remote;
+    }
+
+    pub fn send<T>(&mut self, player_id: u32, message: &T)
+        where T: Serialize
+    {
+        let conn = self.connections.get_mut(&player_id).unwrap();
+        let data = bincode::serialize(message).unwrap();
+        conn.tx.write(data);
+    }
+
+    pub async fn recv(&mut self) -> (u32, Arc<Vec<u8>>) {
+        let i = self.connections.iter_mut().map(|(&id, conn)| {
+            conn.rx.recv().map(move |data| (id, data))
+        });
+        let (value, _, _) = select_all(i).await;
+        return value;
+    }
+}

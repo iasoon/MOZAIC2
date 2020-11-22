@@ -28,20 +28,20 @@ use mozaic_core::connection_table::{
 };
 
 use mozaic_core::player_manager::PlayerManager;
-use mozaic_core::websocket::{websocket_server, ws_client};
+use mozaic_core::websocket::{websocket_server, ws_connection};
 
 #[tokio::main]
 async fn main() {
     run_game().await;
 }
 
-fn simulate_player(
+async fn connect_simulated_player (
     player_id: u32,
     player_token: Token)
-{        
-    tokio::spawn(async move {
-        let mut client = ws_client(player_token).await;
+{
+    let mut client = ws_connection(player_token).await;
 
+    tokio::spawn(async move {
         loop {
             let req: PlayerRequest = client.recv().await;
 
@@ -78,10 +78,10 @@ async fn run_game() {
     for &player_id in &[1, 2] {
         let player_token: Token = rand::thread_rng().gen();
         handler.borrow_mut().create_player(player_id, player_token);
-        simulate_player(
+        connect_simulated_player(
             player_id,
             player_token
-        );
+        ).await;
     }
 
     loop {

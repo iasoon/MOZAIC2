@@ -10,3 +10,4 @@ pub mod player_supervisor;
 pub mod connection_table;
 pub mod player_manager;
 pub mod websocket;
+pub mod msg_stream;
