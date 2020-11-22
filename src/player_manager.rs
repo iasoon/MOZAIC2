@@ -80,8 +80,14 @@ impl PlayerManager {
         };
 
         if let Some(tx) = self.request_table.remove(&(player_id, request_id)) {
-            tx.send(value).unwrap_or_else(|_| panic!("send failed"));
+            tx.send(value).unwrap_or_else(|_| {
+                eprintln!("Warning: received a response for a request that wsa dropped")
+            });
         }
+    }
+
+    pub fn players(&self) -> Vec<u32> {
+        self.players.keys().cloned().collect()
     }
 
     pub async fn step(&mut self) {
