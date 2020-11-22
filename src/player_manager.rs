@@ -1,18 +1,16 @@
 use std::collections::HashMap;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use rand::Rng;
 use futures::{Future, FutureExt};
 use std::pin::Pin;
 use futures::task::{Context, Poll};
 use tokio::time::Duration;
 
-use crate::connection_table::{Token, Message, ConnectionTableHandle};
+use crate::connection_table::{Token, Message, ConnectionTableHandle, ConnectionManager};
 use crate::player_supervisor::{PlayerSupervisor, SupervisorMsg, SupervisorRequest};
 
 pub struct PlayerManager {
-    rx: mpsc::UnboundedReceiver<Message>,
-    tx: mpsc::UnboundedSender<Message>,
-
+    conn_mgr: ConnectionManager,
     request_table: HashMap<(u32, u32), RequestHandle>,
     players: HashMap<u32, PlayerData>,
     conn_player: HashMap<Token, u32>,
@@ -23,34 +21,29 @@ pub struct PlayerManager {
 
 impl PlayerManager {
     pub fn new(connection_table: ConnectionTableHandle) -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
-        return PlayerManager {
-            rx,
-            tx,
-
+        PlayerManager {
+            conn_mgr: ConnectionManager::new(connection_table.clone()),
             request_table: HashMap::new(),
             players: HashMap::new(),
             conn_player: HashMap::new(),
 
             connection_table,
-        };
+        }
     }
     pub fn create_player(&mut self, player_id: u32, token: Token) {
         let supervisor_token = rand::thread_rng().gen();
+        self.conn_mgr.create_connection(supervisor_token);
         PlayerSupervisor::create(
             self.connection_table.clone(),
             supervisor_token,
             token
         ).run();
 
-
         self.players.insert(player_id, PlayerData {
             supervisor_token,
             msg_ctr: 0,
         });
         self.conn_player.insert(supervisor_token, player_id);
-
-        self.connection_table.subscribe(&supervisor_token, self.tx.clone());
     }
 
     pub fn request(&mut self,
@@ -67,10 +60,8 @@ impl PlayerManager {
             content,
             timeout
         };
-        self.connection_table.receive(Message {
-            conn_token: player.supervisor_token,
-            payload: bincode::serialize(&req).unwrap(),
-        });
+
+        self.conn_mgr.emit(player.supervisor_token, &req);
         player.msg_ctr += 1;
         return Request { rx };
     }
@@ -94,7 +85,7 @@ impl PlayerManager {
     }
 
     pub async fn step(&mut self) {
-        let msg = self.rx.recv().await.unwrap();
+        let msg = self.conn_mgr.recv().await;
         self.receive(msg);
     }
 }

@@ -3,7 +3,12 @@ use futures::{Stream, StreamExt, FutureExt};
 use serde::{Serialize, Deserialize};
 use futures::stream::{FusedStream};
 
-use super::connection_table::{ConnectionTableHandle, ConnectionHandle, Token};
+use super::connection_table::{
+    ConnectionTableHandle,
+    ConnectionHandle,
+    Client,
+    Token,
+};
 
 use std::collections::{BinaryHeap, HashSet};
 use tokio::time::{Sleep, Instant, Duration, sleep_until};
@@ -41,7 +46,7 @@ pub struct PlayerResponse {
 
 
 pub struct PlayerSupervisor {
-    game_conn: ConnectionHandle,
+    game_conn: Client,
 
     player_conn: ConnectionHandle,
 
@@ -57,8 +62,7 @@ impl PlayerSupervisor {
         player_token: Token
     ) -> Self
     {
-        let game_conn = connection_table.create_connection(token.clone());
-
+        let game_conn = connection_table.connect(token.clone());
         let player_conn = connection_table.create_connection(player_token.clone());
 
         return PlayerSupervisor {

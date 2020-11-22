@@ -54,7 +54,7 @@ impl ConnectionTableHandle {
         self.connection_table.lock().unwrap()
     }
 
-    pub fn emit(&mut self, message: Message) {
+    fn emit(&mut self, message: Message) {
         let mut lock = self.lock();
         let conn = lock.connection(&message.conn_token);
         let mut i = 0;
@@ -67,17 +67,9 @@ impl ConnectionTableHandle {
 
     }
     
-    pub fn receive(&mut self, message: Message) {
+    fn receive(&mut self, message: Message) {
         self.lock().connection(&message.conn_token).rx.send(message)
             .unwrap_or_else(|_| panic!("writing to channel failed"));
-    }
-
-    pub fn subscribe(
-        &mut self,
-        conn_token: &Token,
-        sink: mpsc::UnboundedSender<Message>) 
-    {
-        self.lock().connection(conn_token).subscribers.push(sink);
     }
 
     pub fn create_connection(
@@ -98,6 +90,13 @@ impl ConnectionTableHandle {
             token,
             table_handle: self.clone(),
         };
+    }
+
+    pub fn connect(&mut self, token: Token) -> Client {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.lock().connection(&token).subscribers.push(tx);
+        let table_handle = self.clone();
+        return Client { rx, token, table_handle };
     }
 }
 
@@ -128,5 +127,68 @@ impl ConnectionHandle {
             let msg = item.unwrap();
             return bincode::deserialize(&msg.payload[..]).unwrap();
         })
+    }
+}
+
+
+pub struct Client {
+    rx: mpsc::UnboundedReceiver<Message>,
+    token: Token,
+    table_handle: ConnectionTableHandle,
+}
+
+impl Client {
+    pub fn emit<T>(&mut self, t: T)
+        where T: Serialize
+    {
+        let serialized = bincode::serialize(&t).unwrap();
+        let message = Message {
+            conn_token: self.token,
+            payload: serialized,
+        };
+        self.table_handle.receive(message);
+    }
+
+    pub fn recv<'a, T>(&'a mut self) -> impl FusedFuture<Output=T> + 'a
+        where T: for<'b> Deserialize<'b>
+    {
+        // TODO: handle errors
+        self.rx.next().map(|item| {
+            let msg = item.unwrap();
+            return bincode::deserialize(&msg.payload[..]).unwrap();
+        })
+    }
+}
+
+pub struct ConnectionManager {
+    rx: mpsc::UnboundedReceiver<Message>,
+    tx: mpsc::UnboundedSender<Message>,
+    table_handle: ConnectionTableHandle,
+}
+
+impl ConnectionManager {
+    pub fn new(table_handle: ConnectionTableHandle) -> Self {
+        let (tx, rx) = mpsc::unbounded_channel();
+        return ConnectionManager { rx, tx, table_handle };
+    }
+
+    pub fn create_connection(&mut self, token: Token) {
+        self.table_handle.lock().connections.insert(token, Connection {
+            subscribers: Vec::new(),
+            rx: self.tx.clone(),
+        });
+    }
+
+    pub fn emit<T>(&mut self, token: Token, payload: &T)
+        where T: Serialize
+    {
+        self.table_handle.emit(Message {
+            conn_token: token,
+            payload: bincode::serialize(payload).unwrap(),
+        });
+    }
+
+    pub async fn recv(&mut self) -> Message {
+        return self.rx.recv().await.unwrap()
     }
 }
