@@ -74,6 +74,16 @@ async fn run_game() {
     pin_mut!(game_);
     let mut game: Pin<&mut _> = game_;
 
+    // register players - this should be done by a lobby or something
+    for &player_id in &[1, 2] {
+        let player_token: Token = rand::thread_rng().gen();
+        handler.borrow_mut().create_player(player_id, player_token);
+        simulate_player(
+            player_id,
+            player_token
+        );
+    }
+
     loop {
         if let Poll::Ready(outcome) =  poll!(game.as_mut()) {
             return outcome;
@@ -83,27 +93,12 @@ async fn run_game() {
 }
 
 async fn guessing_game(player_handler: Rc<RefCell<PlayerManager>>) {
-
-    let mut winner = None;
     let the_number: u8 = rand::thread_rng().gen_range(1, 11);
     println!("the number is {}", the_number);
 
-    // list of player ids
-    let players: Vec<u32> = vec![1, 2];
-    
-    // register players
-    for &player_id in players.iter() {
-        let player_token: Token = rand::thread_rng().gen();
-        player_handler.borrow_mut().create_player(player_id, player_token);
-        simulate_player(
-            player_id,
-            player_token
-        );
-    }
+    let players = player_handler.borrow().players();
 
-    let mut turn_num: usize = 0;
-    while winner.is_none() {
-        turn_num += 1;
+    for turn_num in 1..=10  {
         println!("round {}", turn_num);
         let guesses = 
             // for every player:
@@ -131,13 +126,12 @@ async fn guessing_game(player_handler: Rc<RefCell<PlayerManager>>) {
                 let guess = bytes[0];
                 println!("received guess from {}: {}", player_id, guess);
                 if guess == the_number {
-                    winner = Some(player_id);
-                    break;
+                    println!("{} won the game", player_id);
+                    return;
                 }
             } else {
                 println!("{} timed out", player_id);
             }
         }
     }
-    println!("{} won the game", winner.unwrap());
 }
