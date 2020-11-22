@@ -25,10 +25,10 @@ use mozaic_core::player_supervisor::{
 use mozaic_core::connection_table::{
     Token,
     ConnectionTable,
-    ConnectionTableHandle,
 };
 
 use mozaic_core::player_manager::PlayerManager;
+use mozaic_core::websocket::{websocket_server, ws_client};
 
 #[tokio::main]
 async fn main() {
@@ -36,13 +36,12 @@ async fn main() {
 }
 
 fn simulate_player(
-    mut connection_table: ConnectionTableHandle,
     player_id: u32,
     player_token: Token)
-{
-    let mut client = connection_table.connect(player_token);
-        
+{        
     tokio::spawn(async move {
+        let mut client = ws_client(player_token).await;
+
         loop {
             let req: PlayerRequest = client.recv().await;
 
@@ -67,6 +66,7 @@ fn simulate_player(
 
 async fn run_game() {
     let conn_table = ConnectionTable::new();
+    tokio::spawn(websocket_server(conn_table.clone()));
     let handler = Rc::new(RefCell::new(PlayerManager::new(conn_table)));
 
     let game_ = guessing_game(handler.clone());
@@ -96,7 +96,6 @@ async fn guessing_game(player_handler: Rc<RefCell<PlayerManager>>) {
         let player_token: Token = rand::thread_rng().gen();
         player_handler.borrow_mut().create_player(player_id, player_token);
         simulate_player(
-            player_handler.borrow().connection_table.clone(),
             player_id,
             player_token
         );

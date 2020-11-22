@@ -67,7 +67,7 @@ impl ConnectionTableHandle {
 
     }
     
-    fn receive(&mut self, message: Message) {
+    pub fn receive(&mut self, message: Message) {
         self.lock().connection(&message.conn_token).rx.send(message)
             .unwrap_or_else(|_| panic!("writing to channel failed"));
     }
@@ -94,9 +94,17 @@ impl ConnectionTableHandle {
 
     pub fn connect(&mut self, token: Token) -> Client {
         let (tx, rx) = mpsc::unbounded_channel();
-        self.lock().connection(&token).subscribers.push(tx);
+        self.register_subscriber(&token, tx);
         let table_handle = self.clone();
         return Client { rx, token, table_handle };
+    }
+
+    pub fn register_subscriber(
+        &mut self,
+        token: &Token,
+        sink: mpsc::UnboundedSender<Message>)
+    {
+        self.lock().connection(&token).subscribers.push(sink);
     }
 }
 
