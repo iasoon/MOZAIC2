@@ -2,7 +2,6 @@
 extern crate tokio;
 extern crate rand;
 
-#[macro_use]
 extern crate futures;
 extern crate bincode;
 
@@ -27,7 +26,7 @@ use mozaic_core::websocket::{websocket_server, ws_connection};
 #[tokio::main]
 async fn main() {
     let conn_table = ConnectionTable::new();
-    tokio::spawn(websocket_server(conn_table.clone()));
+    tokio::spawn(websocket_server(conn_table.clone(), "127.0.0.1:8080"));
     let player_mgr = PlayerManager::new(conn_table);
     guessing_game(player_mgr).await;
 
@@ -38,7 +37,8 @@ fn simulate_player (
     player_token: Token)
 {
     tokio::spawn(async move {
-        let mut client = ws_connection(player_token).await;
+        let url = "ws://127.0.0.1:8080";
+        let mut client = ws_connection(url, player_token).await;
 
         loop {
             let req: PlayerRequest = client.recv().await;

@@ -22,9 +22,9 @@ pub enum TransportMsg {
 }
 
 pub async fn websocket_server(
-    connection_table: ConnectionTableHandle)
+    connection_table: ConnectionTableHandle,
+    addr: &str)
 {
-    let addr = "127.0.0.1:8080".to_string();
     let try_socket = TcpListener::bind(&addr).await;
     let listener = try_socket.expect("Failed to bind");
 
@@ -71,9 +71,7 @@ async fn accept_connection(
     }
 }
 
-pub async fn ws_connection(token: Token) -> Connection {
-
-    let url = "ws://127.0.0.1:8080".to_string();
+pub async fn ws_connection(url: &str, token: Token) -> Connection {
     let (ws_stream, _) = tokio_tungstenite::connect_async(url)
         .await
         .expect("Failed to connect");
