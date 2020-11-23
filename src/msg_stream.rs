@@ -38,10 +38,10 @@ pub struct MsgStreamHandle {
 }
 
 impl MsgStreamHandle {
-    pub fn reader(&self, pos: usize) -> MsgStreamReader {
+    pub fn reader(&self) -> MsgStreamReader {
         MsgStreamReader {
             stream: self.stream.clone(),
-            pos,
+            pos: 0,
         }
     }
 
@@ -60,6 +60,17 @@ impl MsgStreamReader {
     pub fn recv<'a>(&'a mut self) -> Recv<'a> {
         Recv {
             reader: self,
+        }
+    }
+
+    pub fn reset_pos(&mut self, pos: usize) {
+        self.pos = pos;
+    }
+
+    pub fn clone(&self) -> Self {
+        MsgStreamReader {
+            stream: self.stream.clone(),
+            pos: self.pos,
         }
     }
 }

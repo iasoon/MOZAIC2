@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use crate::player_manager::Connection;
 use crate::msg_stream::{msg_stream, MsgStreamHandle};
 
+// TODO: this code sucks. Please help.
 pub struct ConnectionStub {
     // sending half
     outgoing: MsgStreamHandle,
@@ -57,7 +58,7 @@ impl ConnectionTableHandle {
 
         let local_conn = Connection {
             tx: outgoing.clone(),
-            rx: incoming.reader(0),
+            rx: incoming.reader(),
         };
 
         let stub = ConnectionStub { incoming, outgoing };
@@ -69,7 +70,7 @@ impl ConnectionTableHandle {
         self.lock().connections.get(token).map(|conn_stub| {
             Connection {
                 tx: conn_stub.incoming.clone(),
-                rx: conn_stub.outgoing.reader(0),
+                rx: conn_stub.outgoing.reader(),
             }
         })
     }

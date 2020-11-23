@@ -10,12 +10,6 @@ use tokio::time::{Duration, sleep};
 use rand::Rng;
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
-use futures::task::{Poll};
-
-use std::cell::RefCell;
-use std::pin::Pin;
-
-use std::rc::Rc;
 
 use mozaic_core::player_supervisor::{
     PlayerRequest,
@@ -32,16 +26,20 @@ use mozaic_core::websocket::{websocket_server, ws_connection};
 
 #[tokio::main]
 async fn main() {
-    run_game().await;
+    let conn_table = ConnectionTable::new();
+    tokio::spawn(websocket_server(conn_table.clone()));
+    let player_mgr = PlayerManager::new(conn_table);
+    guessing_game(player_mgr).await;
+
 }
 
-async fn connect_simulated_player (
+fn simulate_player (
     player_id: u32,
     player_token: Token)
 {
-    let mut client = ws_connection(player_token).await;
-
     tokio::spawn(async move {
+        let mut client = ws_connection(player_token).await;
+
         loop {
             let req: PlayerRequest = client.recv().await;
 
@@ -64,39 +62,22 @@ async fn connect_simulated_player (
     });
 }
 
-async fn run_game() {
-    let conn_table = ConnectionTable::new();
-    tokio::spawn(websocket_server(conn_table.clone()));
-    let handler = Rc::new(RefCell::new(PlayerManager::new(conn_table)));
 
-    let game_ = guessing_game(handler.clone());
-
-    pin_mut!(game_);
-    let mut game: Pin<&mut _> = game_;
-
+async fn guessing_game(mut player_handler: PlayerManager) {
     // register players - this should be done by a lobby or something
     for &player_id in &[1, 2] {
         let player_token: Token = rand::thread_rng().gen();
-        handler.borrow_mut().create_player(player_id, player_token);
-        connect_simulated_player(
+        player_handler.create_player(player_id, player_token);
+        simulate_player(
             player_id,
             player_token
-        ).await;
+        );
     }
-
-    loop {
-        if let Poll::Ready(outcome) =  poll!(game.as_mut()) {
-            return outcome;
-        }
-        handler.borrow_mut().step().await;
-    }
-}
-
-async fn guessing_game(player_handler: Rc<RefCell<PlayerManager>>) {
+    
     let the_number: u8 = rand::thread_rng().gen_range(1, 11);
     println!("the number is {}", the_number);
 
-    let players = player_handler.borrow().players();
+    let players = player_handler.players();
 
     for turn_num in 1..=10  {
         println!("round {}", turn_num);
@@ -105,7 +86,7 @@ async fn guessing_game(player_handler: Rc<RefCell<PlayerManager>>) {
             players.iter()
             // prompt them for their guess
             .map(|&player_id| {
-                player_handler.borrow_mut().request(
+                player_handler.request(
                     player_id,
                     Vec::new(), // no data
                     Duration::from_millis(1000),
