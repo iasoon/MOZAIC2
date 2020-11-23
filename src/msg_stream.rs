@@ -7,13 +7,14 @@ use futures::task::AtomicWaker;
 
 pub fn msg_stream() -> MsgStreamHandle {
     let stream = Arc::new(Mutex::new(MsgStream::new()));
-    let handle = MsgStreamHandle { stream: stream.clone() };
+    let handle = MsgStreamHandle { inner: stream.clone() };
     return handle;
 }
 
 pub struct MsgStream {
     messages: Vec<Arc<Vec<u8>>>,
-    wakers: Vec<AtomicWaker>,
+    wakers: Vec<(usize, Arc<AtomicWaker>)>,
+    reader_counter: usize,
 }
 
 impl MsgStream {
@@ -21,12 +22,13 @@ impl MsgStream {
         MsgStream {
             messages: Vec::new(),
             wakers: Vec::new(),
+            reader_counter: 0,
         }
     }
 
     fn append(&mut self, msg: Vec<u8>) {
         self.messages.push(Arc::new(msg));
-        for waker in self.wakers.drain(..) {
+        for (_reader_id, waker) in self.wakers.iter() {
             waker.wake();
         }
     }
@@ -34,25 +36,37 @@ impl MsgStream {
 
 #[derive(Clone)]
 pub struct MsgStreamHandle {
-    stream: Arc<Mutex<MsgStream>>,
+    inner: Arc<Mutex<MsgStream>>,
 }
 
 impl MsgStreamHandle {
     pub fn reader(&self) -> MsgStreamReader {
+        let mut inner = self.inner.lock().unwrap();
+
+        let reader_id = inner.reader_counter;
+        inner.reader_counter += 1;
+
+        let waker = Arc::new(AtomicWaker::new());
+        inner.wakers.push((reader_id, waker.clone()));
+    
         MsgStreamReader {
-            stream: self.stream.clone(),
+            stream: self.clone(),
+            reader_id,
+            waker,
             pos: 0,
         }
     }
 
     pub fn write(&mut self, msg: Vec<u8>) {
-        let mut inner = self.stream.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
         inner.append(msg);
     }
 }
 
 pub struct MsgStreamReader {
-    stream: Arc<Mutex<MsgStream>>,
+    stream: MsgStreamHandle,
+    waker: Arc<AtomicWaker>,
+    reader_id: usize,
     pos: usize,
 }
 
@@ -68,10 +82,17 @@ impl MsgStreamReader {
     }
 
     pub fn clone(&self) -> Self {
-        MsgStreamReader {
-            stream: self.stream.clone(),
-            pos: self.pos,
-        }
+        let mut r = self.stream.reader();
+        r.pos = self.pos;
+        return r;
+    }
+}
+
+impl Drop for MsgStreamReader {
+    
+    fn drop(&mut self) {
+        let mut inner = self.stream.inner.lock().unwrap();
+        inner.wakers.retain(|(id, _)| id != &self.reader_id);
     }
 }
 
@@ -96,15 +117,13 @@ impl<'s> Future for Recv<'s> {
     {
         let Recv { reader } = self.get_mut();
     
-        let mut inner = reader.stream.lock().unwrap();
+        let inner = reader.stream.inner.lock().unwrap();
         if inner.messages.len() > reader.pos {
             let value = inner.messages[reader.pos].clone();
             reader.pos += 1;
             Poll::Ready(value)
         } else {
-            let waker = AtomicWaker::new();
-            waker.register(cx.waker());
-            inner.wakers.push(waker);
+            reader.waker.register(cx.waker());
             Poll::Pending
         }
     }
