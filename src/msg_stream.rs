@@ -4,10 +4,16 @@ use futures::task::{Context, Poll};
 use futures::FutureExt;
 use futures::{Future, Stream};
 use futures::task::AtomicWaker;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+// TODO: restructure this code for a bit
 
 pub fn msg_stream() -> MsgStreamHandle {
-    let stream = Arc::new(Mutex::new(MsgStream::new()));
-    let handle = MsgStreamHandle { inner: stream.clone() };
+    let inner = Arc::new(Inner{
+        msg_count: AtomicUsize::new(0),
+        msg_stream: Mutex::new(MsgStream::new()),
+    });
+    let handle = MsgStreamHandle { inner: inner.clone() };
     return handle;
 }
 
@@ -25,23 +31,21 @@ impl MsgStream {
             reader_counter: 0,
         }
     }
+}
 
-    fn append(&mut self, msg: Vec<u8>) {
-        self.messages.push(Arc::new(msg));
-        for (_reader_id, waker) in self.wakers.iter() {
-            waker.wake();
-        }
-    }
+struct Inner {
+    msg_stream: Mutex<MsgStream>,
+    msg_count: AtomicUsize,
 }
 
 #[derive(Clone)]
 pub struct MsgStreamHandle {
-    inner: Arc<Mutex<MsgStream>>,
+    inner: Arc<Inner>,
 }
 
 impl MsgStreamHandle {
     pub fn reader(&self) -> MsgStreamReader {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.msg_stream.lock().unwrap();
 
         let reader_id = inner.reader_counter;
         inner.reader_counter += 1;
@@ -58,8 +62,12 @@ impl MsgStreamHandle {
     }
 
     pub fn write(&mut self, msg: Vec<u8>) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.append(msg);
+        let mut inner = self.inner.msg_stream.lock().unwrap();
+        inner.messages.push(Arc::new(msg));
+        self.inner.msg_count.store(inner.messages.len(), Ordering::Relaxed);
+        for (_id, waker) in inner.wakers.iter() {
+            waker.wake();
+        }
     }
 }
 
@@ -91,7 +99,7 @@ impl MsgStreamReader {
 impl Drop for MsgStreamReader {
     
     fn drop(&mut self) {
-        let mut inner = self.stream.inner.lock().unwrap();
+        let mut inner = self.stream.inner.msg_stream.lock().unwrap();
         inner.wakers.retain(|(id, _)| id != &self.reader_id);
     }
 }
@@ -116,9 +124,11 @@ impl<'s> Future for Recv<'s> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>
     {
         let Recv { reader } = self.get_mut();
+
+        let msg_count = reader.stream.inner.msg_count.load(Ordering::Relaxed);
     
-        let inner = reader.stream.inner.lock().unwrap();
-        if inner.messages.len() > reader.pos {
+        if msg_count > reader.pos {
+            let inner = reader.stream.inner.msg_stream.lock().unwrap();
             let value = inner.messages[reader.pos].clone();
             reader.pos += 1;
             Poll::Ready(value)
