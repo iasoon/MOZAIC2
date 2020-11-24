@@ -5,8 +5,6 @@ use futures::stream::{FusedStream};
 
 use super::connection_table::{
     ConnectionTableHandle,
-    ConnectionHandle,
-    Client,
     Token,
 };
 
@@ -15,6 +13,7 @@ use tokio::time::{Sleep, Instant, Duration, sleep_until};
 use std::cmp::{Ord, Ordering};
 use std::pin::Pin;
 use futures::task::{Context, Poll};
+use crate::player_manager::Connection;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SupervisorRequest {
@@ -46,9 +45,9 @@ pub struct PlayerResponse {
 
 
 pub struct PlayerSupervisor {
-    game_conn: Client,
+    game_conn: Connection,
 
-    player_conn: ConnectionHandle,
+    player_conn: Connection,
 
     timeouts: TimeoutHeap<u32>,
     open_requests: HashSet<u32>,
@@ -58,12 +57,12 @@ pub struct PlayerSupervisor {
 impl PlayerSupervisor {
     pub fn create(
         mut connection_table: ConnectionTableHandle,
-        token: Token,
+        game_conn: Connection,
         player_token: Token
     ) -> Self
     {
-        let game_conn = connection_table.connect(token.clone());
-        let player_conn = connection_table.create_connection(player_token.clone());
+
+        let player_conn = connection_table.open_connection(player_token);
 
         return PlayerSupervisor {
             game_conn,
