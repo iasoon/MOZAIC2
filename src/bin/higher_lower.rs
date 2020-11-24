@@ -7,55 +7,42 @@
 //!
 //! Ofcourse, the goal is to guess the number as fast a possible!
 
-extern crate rand;
 extern crate tokio;
+extern crate rand;
 
-#[macro_use]
 extern crate futures;
 extern crate bincode;
 
-use futures::stream::futures_unordered::FuturesUnordered;
-use futures::task::Poll;
-use futures::{FutureExt, StreamExt};
+use std::collections::HashMap;
+
+use tokio::time::{Duration, sleep};
 use rand::Rng;
-use tokio::time::{sleep, Duration};
+use futures::stream::futures_unordered::FuturesUnordered;
+use futures::{FutureExt, StreamExt};
 
-use std::pin::Pin;
-use std::{cell::RefCell, collections::HashMap};
+use mozaic_core::player_supervisor::{
+    PlayerRequest,
+    PlayerResponse,
+};
 
-use std::rc::Rc;
-
-use mozaic_core::player_supervisor::{PlayerRequest, PlayerResponse};
-
-use mozaic_core::connection_table::{ConnectionTable, Token};
+use mozaic_core::connection_table::{
+    Token,
+    ConnectionTable,
+};
 
 use mozaic_core::player_manager::PlayerManager;
-use mozaic_core::websocket::{websocket_server, ws_client};
+use mozaic_core::websocket::{websocket_server, ws_connection};
 
 #[tokio::main]
 async fn main() {
-    run_game().await;
-}
-
-async fn run_game() {
     let conn_table = ConnectionTable::new();
-    tokio::spawn(websocket_server(conn_table.clone()));
-    let handler = Rc::new(RefCell::new(PlayerManager::new(conn_table)));
+    tokio::spawn(websocket_server(conn_table.clone(), "127.0.0.1:8080"));
+    let player_mgr = PlayerManager::new(conn_table);
+    higher_lower(player_mgr).await;
 
-    let game_ = higher_lower(handler.clone());
-
-    pin_mut!(game_);
-    let mut game: Pin<&mut _> = game_;
-
-    loop {
-        if let Poll::Ready(outcome) = poll!(game.as_mut()) {
-            return outcome;
-        }
-        handler.borrow_mut().step().await;
-    }
 }
 
-async fn higher_lower(player_handler: Rc<RefCell<PlayerManager>>) {
+async fn higher_lower(mut player_handler: PlayerManager) {
     let mut winner: Option<u32> = None;
     let the_number: u8 = rand::thread_rng().gen_range(1, 11);
     println!("the number is {}", the_number);
@@ -66,9 +53,7 @@ async fn higher_lower(player_handler: Rc<RefCell<PlayerManager>>) {
     // register players
     for &player_id in players.iter() {
         let player_token: Token = rand::thread_rng().gen();
-        player_handler
-            .borrow_mut()
-            .create_player(player_id, player_token);
+        player_handler.create_player(player_id, player_token);
         
         // Use a simulated player for demo purposes
         // Player 1 gets to be smarter!
@@ -112,7 +97,7 @@ async fn higher_lower(player_handler: Rc<RefCell<PlayerManager>>) {
                 };
 
                 // Send the answer + request for next guess
-                player_handler.borrow_mut().request(
+                player_handler.request(
                     player_id,
                     answer.as_bytes().to_owned(), // no data
                     Duration::from_millis(1000),
@@ -153,7 +138,8 @@ async fn higher_lower(player_handler: Rc<RefCell<PlayerManager>>) {
 /// Simulate a player for demo purposes
 fn simulate_player(player_id: u32, player_token: Token) {
     tokio::spawn(async move {
-        let mut client = ws_client(player_token).await;
+        let url = "ws://127.0.0.1:8080";
+        let mut client = ws_connection(url, player_token).await;
 
         loop {
             let req: PlayerRequest = client.recv().await;
@@ -179,7 +165,8 @@ fn simulate_player(player_id: u32, player_token: Token) {
 /// Simulate a smarter (!) player for demo purposes
 fn simulate_smarter_player(player_id: u32, player_token: Token) {
     tokio::spawn(async move {
-        let mut client = ws_client(player_token).await;
+        let url = "ws://127.0.0.1:8080";
+        let mut client = ws_connection(url, player_token).await;
 
         // Initialise state
         let mut upper_bound: u8 = 11;
