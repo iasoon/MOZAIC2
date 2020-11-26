@@ -9,43 +9,38 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 // TODO: restructure this code for a bit
 
 pub fn msg_stream() -> MsgStreamHandle {
-    let inner = Arc::new(Inner{
+    let stream = Arc::new(MsgStream {
         msg_count: AtomicUsize::new(0),
-        msg_stream: Mutex::new(MsgStream::new()),
+        state_mutex: Mutex::new(InnerState {
+            messages: Vec::new(),
+            wakers: Vec::new(),
+            reader_counter: 0,
+        }),
     });
-    let handle = MsgStreamHandle { inner: inner.clone() };
+    let handle = MsgStreamHandle { stream: stream.clone() };
     return handle;
 }
 
-pub struct MsgStream {
+pub struct InnerState {
     messages: Vec<Arc<Vec<u8>>>,
     wakers: Vec<(usize, Arc<AtomicWaker>)>,
     reader_counter: usize,
 }
 
-impl MsgStream {
-    fn new() -> Self {
-        MsgStream {
-            messages: Vec::new(),
-            wakers: Vec::new(),
-            reader_counter: 0,
-        }
-    }
-}
 
-struct Inner {
-    msg_stream: Mutex<MsgStream>,
+struct MsgStream {
+    state_mutex: Mutex<InnerState>,
     msg_count: AtomicUsize,
 }
 
 #[derive(Clone)]
 pub struct MsgStreamHandle {
-    inner: Arc<Inner>,
+    stream: Arc<MsgStream>,
 }
 
 impl MsgStreamHandle {
     pub fn reader(&self) -> MsgStreamReader {
-        let mut inner = self.inner.msg_stream.lock().unwrap();
+        let mut inner = self.stream.state_mutex.lock().unwrap();
 
         let reader_id = inner.reader_counter;
         inner.reader_counter += 1;
@@ -54,7 +49,7 @@ impl MsgStreamHandle {
         inner.wakers.push((reader_id, waker.clone()));
     
         MsgStreamReader {
-            stream: self.clone(),
+            stream_handle: self.clone(),
             reader_id,
             waker,
             pos: 0,
@@ -62,9 +57,9 @@ impl MsgStreamHandle {
     }
 
     pub fn write(&mut self, msg: Vec<u8>) {
-        let mut inner = self.inner.msg_stream.lock().unwrap();
+        let mut inner = self.stream.state_mutex.lock().unwrap();
         inner.messages.push(Arc::new(msg));
-        self.inner.msg_count.store(inner.messages.len(), Ordering::Relaxed);
+        self.stream.msg_count.store(inner.messages.len(), Ordering::Relaxed);
         for (_id, waker) in inner.wakers.iter() {
             waker.wake();
         }
@@ -72,7 +67,7 @@ impl MsgStreamHandle {
 }
 
 pub struct MsgStreamReader {
-    stream: MsgStreamHandle,
+    stream_handle: MsgStreamHandle,
     waker: Arc<AtomicWaker>,
     reader_id: usize,
     pos: usize,
@@ -90,7 +85,7 @@ impl MsgStreamReader {
     }
 
     pub fn clone(&self) -> Self {
-        let mut r = self.stream.reader();
+        let mut r = self.stream_handle.reader();
         r.pos = self.pos;
         return r;
     }
@@ -99,7 +94,7 @@ impl MsgStreamReader {
 impl Drop for MsgStreamReader {
     
     fn drop(&mut self) {
-        let mut inner = self.stream.inner.msg_stream.lock().unwrap();
+        let mut inner = self.stream_handle.stream.state_mutex.lock().unwrap();
         inner.wakers.retain(|(id, _)| id != &self.reader_id);
     }
 }
@@ -125,10 +120,12 @@ impl<'s> Future for Recv<'s> {
     {
         let Recv { reader } = self.get_mut();
 
-        let msg_count = reader.stream.inner.msg_count.load(Ordering::Relaxed);
+        let msg_count = reader.stream_handle.stream.msg_count
+            .load(Ordering::Relaxed);
     
         if msg_count > reader.pos {
-            let inner = reader.stream.inner.msg_stream.lock().unwrap();
+            let inner = reader.stream_handle
+                .stream.state_mutex.lock().unwrap();
             let value = inner.messages[reader.pos].clone();
             reader.pos += 1;
             Poll::Ready(value)
