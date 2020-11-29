@@ -1,24 +1,26 @@
-use futures::{SinkExt, StreamExt, FutureExt};
+use crate::msg_stream::MsgStreamReader;
+use std::collections::HashMap;
+use futures::stream::FusedStream;
+use futures::{Stream, SinkExt, StreamExt, FutureExt};
+use futures::stream::{StreamFuture, FuturesUnordered};
+use futures::task::{Poll, Context};
 use tokio::net::{TcpListener, TcpStream};
 use crate::connection_table::{Token, ConnectionTableHandle};
 use crate::player_manager::Connection;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use serde::{Serialize, Deserialize};
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Connect {
-    token: Token,
-}
+use std::pin::Pin;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Send {
+    player_token: Token,
     data: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum TransportMsg {
-    Subscribe { token: Token },
-    Publish { token: Token, data: Vec<u8> },
+pub enum ClientMessage {
+    ConnectPlayer { token: Token },
+    PlayerMessage { token: Token, data: Vec<u8> },
 }
 
 pub async fn websocket_server(
@@ -41,28 +43,48 @@ async fn accept_connection(
         .expect("Error during the websocket handshake occurred")
         .fuse();
 
-    let data = match ws_stream.next().await {
-        Some(Ok(data)) => data.into_data(),
-        _ => panic!("what did you just send me???"),
-    };
-    let connect_msg: Connect = bincode::deserialize(&data).unwrap();
-    let mut conn = match conn_table.connect(&connect_msg.token) {
-        Some(conn) => conn,
-        None => panic!("no such connection"),
-    };
+    let mut stream_set: StreamSet<Token, MsgStreamReader> = StreamSet::new();
+    let mut writers = HashMap::new();
+
 
     loop {
         select!(
-            data = conn.rx.recv().fuse() => {
-                let msg = Send { data: data.as_ref().clone() };
+            item = stream_set.next() => {
+                let (player_token, data) = item.unwrap();
+                let msg = Send {
+                    player_token,
+                    data: data.as_ref().clone()
+                };
                 let ws_msg = WsMessage::from(bincode::serialize(&msg).unwrap());
                 ws_stream.send(ws_msg).await.unwrap();
             }
             ws_msg = ws_stream.next() => {
                 match ws_msg {
                     Some(Ok(msg)) => {
-                        let send: Send = bincode::deserialize(&msg.into_data()).unwrap();
-                        conn.tx.write(send.data);
+                        let client_msg: ClientMessage = bincode::deserialize(&msg.into_data()).unwrap();
+                        match client_msg {
+                            ClientMessage::ConnectPlayer { token } => {
+                                let c = conn_table.connect(&token);
+
+                                // TODO: don't panic
+                                // AND BREAK THIS FUNCTION UP JESUS
+                                let Connection { tx, rx } = match c {
+                                    Some(conn) => conn,
+                                    None => panic!("no such connection"),
+                                };
+
+                                stream_set.push(token, rx);
+                                writers.insert(token, tx);
+
+                            }
+                            ClientMessage::PlayerMessage { token, data } => {
+                                if let Some(tx) = writers.get_mut(&token) {
+                                    tx.write(data);
+                                } else {
+                                    eprintln!("got message for unregistered player {:x?}", token);
+                                }
+                            }
+                        }
                     }
                     _ => return,
                 }
@@ -80,7 +102,7 @@ pub async fn ws_connection(url: &str, token: Token) -> Connection {
     let (mut upstream, downstream) = Connection::create();
 
     // subscribe to connection
-    let t_msg = Connect { token };
+    let t_msg = ClientMessage::ConnectPlayer { token };
     let ws_msg = WsMessage::from(bincode::serialize(&t_msg).unwrap());
     ws_stream.send(ws_msg).await.unwrap();
 
@@ -95,7 +117,10 @@ pub async fn ws_connection(url: &str, token: Token) -> Connection {
                     upstream.tx.write(send.data);
                 }
                 data = upstream.rx.recv().fuse() => {
-                    let msg = Send { data: data.as_ref().clone() };
+                    let msg = ClientMessage::PlayerMessage {
+                        token: token,
+                        data: data.as_ref().clone(),
+                    };
                     let ws_msg = WsMessage::from(bincode::serialize(&msg).unwrap());
                     ws_stream.send(ws_msg).await.unwrap();
                 }
@@ -104,4 +129,71 @@ pub async fn ws_connection(url: &str, token: Token) -> Connection {
     });
 
     return downstream;
+}
+
+struct StreamSet<K, S> {
+    inner: FuturesUnordered<StreamFuture<StreamSetEntry<K, S>>>,
+}
+
+impl<K, S> StreamSet<K, S>
+    where S: Stream + Unpin,
+          K: Unpin,
+{
+    fn new() -> Self {
+        StreamSet { inner: FuturesUnordered::new() }
+    }
+
+    fn push(&mut self, key: K, stream: S) {
+        self.inner.push(StreamSetEntry{ key, stream }.into_future());
+    }
+}
+
+impl<K, S> Stream for StreamSet<K, S>
+    where S: Stream + Unpin,
+          K: Clone + Unpin,
+{
+    type Item = (K, S::Item);
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>)
+        -> Poll<Option<Self::Item>>
+    {
+        let inner = &mut self.get_mut().inner;
+        let res = ready!(inner.poll_next_unpin(cx));
+        match res {
+            None => return Poll::Pending,
+            Some((None, _stream)) => return Poll::Pending,
+            Some((Some(item), stream)) => {
+                let key = stream.key.clone();
+                inner.push(stream.into_future());
+                return Poll::Ready(Some((key, item)));
+            }
+        }
+    }
+}
+
+impl<K, S> FusedStream for StreamSet<K, S>
+    where S: Stream + Unpin,
+          K: Clone + Unpin,
+{
+    fn is_terminated(&self) -> bool {
+        return false;
+    }
+}
+
+struct StreamSetEntry<K, S> {
+    key: K,
+    stream: S,
+}
+
+impl<K, S> Stream for StreamSetEntry<K, S>
+    where S: Stream + Unpin,
+          K: Unpin,
+{
+    type Item = S::Item;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>)
+        -> Poll<Option<Self::Item>>
+    {
+        self.get_mut().stream.poll_next_unpin(cx)
+    }
 }
