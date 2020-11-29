@@ -5,6 +5,7 @@ extern crate rand;
 extern crate futures;
 extern crate bincode;
 
+use mozaic_core::player_manager::Connection;
 use tokio::time::{Duration, sleep};
 use rand::Rng;
 use futures::stream::futures_unordered::FuturesUnordered;
@@ -18,62 +19,89 @@ use mozaic_core::player_supervisor::{
 use mozaic_core::connection_table::{
     Token,
     ConnectionTable,
+    ConnectionTableHandle,
 };
 
 use mozaic_core::player_manager::PlayerManager;
-use mozaic_core::websocket::{websocket_server, ws_connection};
+use mozaic_core::websocket::{websocket_server, connect_client};
+use mozaic_core::client_manager::ClientMgrHandle;
 
 #[tokio::main]
 async fn main() {
     let conn_table = ConnectionTable::new();
-    tokio::spawn(websocket_server(conn_table.clone(), "127.0.0.1:8080"));
-    let player_mgr = PlayerManager::new(conn_table);
-    guessing_game(player_mgr).await;
-
+    let client_manager = ClientMgrHandle::new();
+    tokio::spawn(
+        websocket_server(
+            conn_table.clone(),
+            client_manager.clone(),
+            "127.0.0.1:8080"
+        ));
+    run_lobby(client_manager, conn_table).await
 }
 
-fn simulate_player (
-    player_id: u32,
-    player_token: Token)
-{
+fn simulate_client(client_token: Token) {
+    // run client in background
     tokio::spawn(async move {
         let url = "ws://127.0.0.1:8080";
-        let mut client = ws_connection(url, player_token).await;
+        let delay_millis = rand::thread_rng().gen_range(0, 3000);
+        println!("delaying client {:02x?} for {} ms", &client_token[..4], delay_millis);
+    
+        sleep(Duration::from_millis(delay_millis)).await;
 
-        loop {
-            let req: PlayerRequest = client.recv().await;
-
-            let think_millis = rand::thread_rng().gen_range(0, 1200);
-            println!("{} needs to think for {} ms", player_id, think_millis);
-        
-            sleep(Duration::from_millis(think_millis)).await;
-        
-        
-            let guess: u8 = rand::thread_rng().gen_range(1, 11);
-            println!("{} is done thinking and guesses {}", player_id, guess);
-        
-            let response = PlayerResponse {
-                request_id: req.request_id,
-                content: vec![guess]
-            };
-
-            client.emit(response);
-        }
+        connect_client(url, client_token, simulate_player).await;
     });
 }
 
+async fn simulate_player(player_token: Token, mut conn: Connection) {
+    loop {
+        let req: PlayerRequest = conn.recv().await;
 
-async fn guessing_game(mut player_handler: PlayerManager) {
-    // register players - this should be done by a lobby or something
-    for &player_id in &[1, 2] {
-        let player_token: Token = rand::thread_rng().gen();
-        player_handler.create_player(player_id, player_token);
-        simulate_player(
-            player_id,
-            player_token
-        );
-    }
+        let think_millis = rand::thread_rng().gen_range(0, 1200);
+        println!("{:02x?} needs to think for {} ms", &player_token[..4], think_millis);
     
+        sleep(Duration::from_millis(think_millis)).await;
+    
+    
+        let guess: u8 = rand::thread_rng().gen_range(1, 11);
+        println!("{:02x?} is done thinking and guesses {}", &player_token[..4], guess);
+    
+        let response = PlayerResponse {
+            request_id: req.request_id,
+            content: vec![guess]
+        };
+
+        conn.emit(response);
+    }
+}
+
+async fn run_lobby(
+    client_mgr: ClientMgrHandle,
+    conn_table: ConnectionTableHandle,
+) {
+    let client_tokens: [Token; 2] = rand::thread_rng().gen();
+
+    let mut clients = client_tokens.iter().map(|token| {
+        simulate_client(token.clone());
+        client_mgr.get_client(token)
+    }).collect::<Vec<_>>();
+
+
+
+    for match_num in 1..=3 {
+        println!("match {}", match_num);
+        let mut player_mgr = PlayerManager::new(conn_table.clone());
+
+        for (player_num, client) in clients.iter_mut().enumerate() {
+            let player_token: Token = rand::thread_rng().gen();
+            player_mgr.create_player((player_num + 1) as u32, player_token);
+            client.run_player(player_token).await;
+        }
+    
+        guessing_game(player_mgr).await
+    }
+}
+
+async fn guessing_game(mut player_handler: PlayerManager) {    
     let the_number: u8 = rand::thread_rng().gen_range(1, 11);
     println!("the number is {}", the_number);
 
