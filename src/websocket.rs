@@ -49,7 +49,7 @@ async fn accept_connection(
         .expect("Error during the websocket handshake occurred")
         .fuse();
 
-    let mut stream_set: StreamSet<Token, MsgStreamReader> = StreamSet::new();
+    let mut stream_set: StreamSet<Token, MsgStreamReader<Vec<u8>>> = StreamSet::new();
     let mut writers = HashMap::new();
 
     let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<ClientCtrlMsg>(10);
@@ -131,8 +131,8 @@ pub async fn connect_client<F, T>(url: &str, client_token: Token, mut run_player
     let ws_msg = WsMessage::from(bincode::serialize(&t_msg).unwrap());
     ws_stream.send(ws_msg).await.unwrap();
 
-    let mut stream_set: StreamSet<Token, MsgStreamReader> = StreamSet::new();
-    let mut writers: HashMap<Token, MsgStreamHandle> = HashMap::new();
+    let mut stream_set: StreamSet<Token, MsgStreamReader<_>> = StreamSet::new();
+    let mut writers: HashMap<Token, MsgStreamHandle<_>> = HashMap::new();
 
     tokio::spawn(async move {
         loop {

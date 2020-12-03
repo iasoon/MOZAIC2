@@ -76,7 +76,7 @@ struct PlayerData {
 pub struct Request {
     player_id: u32,
     request_id: u32,
-    reader: MsgStreamReader,
+    reader: MsgStreamReader<Vec<u8>>,
 }
 
 impl Request {
@@ -118,8 +118,8 @@ pub type RequestResult<T> = Result<T, RequestError>;
 use crate::msg_stream::{msg_stream, MsgStreamReader, MsgStreamHandle};
 
 pub struct Connection {
-    pub tx: MsgStreamHandle,
-    pub rx: MsgStreamReader,
+    pub tx: MsgStreamHandle<Vec<u8>>,
+    pub rx: MsgStreamReader<Vec<u8>>,
 }
 
 impl Connection {

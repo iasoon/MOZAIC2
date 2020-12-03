@@ -8,9 +8,9 @@ use crate::msg_stream::{msg_stream, MsgStreamHandle};
 // TODO: this code sucks. Please help.
 pub struct ConnectionStub {
     // sending half
-    outgoing: MsgStreamHandle,
+    outgoing: MsgStreamHandle<Vec<u8>>,
     // receiving half
-    incoming: MsgStreamHandle,
+    incoming: MsgStreamHandle<Vec<u8>>,
 }
 
 pub struct ConnectionTable {
@@ -75,7 +75,7 @@ impl ConnectionTableHandle {
         })
     }
 
-    pub fn outgoing(&mut self, token: &Token) -> MsgStreamHandle {
+    pub fn outgoing(&mut self, token: &Token) -> MsgStreamHandle<Vec<u8>> {
         self.lock().connections.get(token).unwrap().outgoing.clone()
     }
 }

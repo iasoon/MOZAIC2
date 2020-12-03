@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 // TODO: restructure this code for a bit
 
-pub fn msg_stream() -> MsgStreamHandle {
+pub fn msg_stream<T>() -> MsgStreamHandle<T> {
     let stream = Arc::new(MsgStream {
         msg_count: AtomicUsize::new(0),
         state_mutex: Mutex::new(InnerState {
@@ -21,25 +21,25 @@ pub fn msg_stream() -> MsgStreamHandle {
     return handle;
 }
 
-pub struct InnerState {
-    messages: Vec<Arc<Vec<u8>>>,
+pub struct InnerState<T> {
+    messages: Vec<Arc<T>>,
     wakers: Vec<(usize, Arc<AtomicWaker>)>,
     reader_counter: usize,
 }
 
 
-struct MsgStream {
-    state_mutex: Mutex<InnerState>,
+struct MsgStream<T> {
+    state_mutex: Mutex<InnerState<T>>,
     msg_count: AtomicUsize,
 }
 
 #[derive(Clone)]
-pub struct MsgStreamHandle {
-    stream: Arc<MsgStream>,
+pub struct MsgStreamHandle<T> {
+    stream: Arc<MsgStream<T>>,
 }
 
-impl MsgStreamHandle {
-    pub fn reader(&self) -> MsgStreamReader {
+impl<T> MsgStreamHandle<T> {
+    pub fn reader(&self) -> MsgStreamReader<T> {
         let mut inner = self.stream.state_mutex.lock().unwrap();
 
         let reader_id = inner.reader_counter;
@@ -49,14 +49,14 @@ impl MsgStreamHandle {
         inner.wakers.push((reader_id, waker.clone()));
     
         MsgStreamReader {
-            stream_handle: self.clone(),
+            stream_handle: MsgStreamHandle { stream: self.stream.clone() },
             reader_id,
             waker,
             pos: 0,
         }
     }
 
-    pub fn write(&mut self, msg: Vec<u8>) {
+    pub fn write(&mut self, msg: T) {
         let mut inner = self.stream.state_mutex.lock().unwrap();
         inner.messages.push(Arc::new(msg));
         self.stream.msg_count.store(inner.messages.len(), Ordering::Relaxed);
@@ -66,15 +66,15 @@ impl MsgStreamHandle {
     }
 }
 
-pub struct MsgStreamReader {
-    stream_handle: MsgStreamHandle,
+pub struct MsgStreamReader<T> {
+    stream_handle: MsgStreamHandle<T>,
     waker: Arc<AtomicWaker>,
     reader_id: usize,
     pos: usize,
 }
 
-impl MsgStreamReader {
-    pub fn recv<'a>(&'a mut self) -> Recv<'a> {
+impl<T> MsgStreamReader<T> {
+    pub fn recv<'a>(&'a mut self) -> Recv<'a, T> {
         Recv {
             reader: self,
         }
@@ -91,7 +91,7 @@ impl MsgStreamReader {
     }
 }
 
-impl Drop for MsgStreamReader {
+impl<T> Drop for MsgStreamReader<T> {
     
     fn drop(&mut self) {
         let mut inner = self.stream_handle.stream.state_mutex.lock().unwrap();
@@ -99,8 +99,8 @@ impl Drop for MsgStreamReader {
     }
 }
 
-impl Stream for MsgStreamReader {
-    type Item = Arc<Vec<u8>>;
+impl<T> Stream for MsgStreamReader<T> {
+    type Item = Arc<T>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>)
         -> Poll<Option<Self::Item>>
@@ -109,12 +109,12 @@ impl Stream for MsgStreamReader {
     }
 }
 
-pub struct Recv<'s> {
-    reader: &'s mut MsgStreamReader,
+pub struct Recv<'s, T> {
+    reader: &'s mut MsgStreamReader<T>,
 }
 
-impl<'s> Future for Recv<'s> {
-    type Output = Arc<Vec<u8>>;
+impl<'s, T> Future for Recv<'s, T> {
+    type Output = Arc<T>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>
     {
