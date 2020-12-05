@@ -33,9 +33,16 @@ struct MsgStream<T> {
     msg_count: AtomicUsize,
 }
 
-#[derive(Clone)]
 pub struct MsgStreamHandle<T> {
     stream: Arc<MsgStream<T>>,
+}
+
+impl<T> Clone for MsgStreamHandle<T> {
+    fn clone(&self) -> Self {
+        MsgStreamHandle {
+            stream: self.stream.clone(),
+        }
+    }
 }
 
 impl<T> MsgStreamHandle<T> {
@@ -49,9 +56,10 @@ impl<T> MsgStreamHandle<T> {
         inner.wakers.push((reader_id, waker.clone()));
     
         MsgStreamReader {
-            stream_handle: MsgStreamHandle { stream: self.stream.clone() },
+            stream_handle: self.clone(),
             reader_id,
             waker,
+            // TODO: maybe set this to head?
             pos: 0,
         }
     }

@@ -1,3 +1,5 @@
+use crate::match_context::{GameEvent, PlayerResponse as PlayerResp, Timeout as TimeoutErr};
+use crate::msg_stream::{MsgStreamHandle, MsgStreamReader};
 use futures::{Stream, StreamExt, FutureExt};
 
 use serde::{Serialize, Deserialize};
@@ -16,7 +18,7 @@ use futures::task::{Context, Poll};
 use crate::match_context::Connection;
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SupervisorRequest {
+pub struct RequestMessage {
     pub request_id: u32,
     pub timeout: Duration,
     pub content: Vec<u8>,
@@ -45,7 +47,9 @@ pub struct PlayerResponse {
 
 
 pub struct PlayerSupervisor {
-    game_conn: Connection,
+    player_id: u32,
+    event_bus: MsgStreamHandle<GameEvent>,
+    game_conn: MsgStreamReader<RequestMessage>,
 
     player_conn: Connection,
 
@@ -57,7 +61,9 @@ pub struct PlayerSupervisor {
 impl PlayerSupervisor {
     pub fn create(
         mut connection_table: ConnectionTableHandle,
-        game_conn: Connection,
+        event_bus: MsgStreamHandle<GameEvent>,
+        game_conn: MsgStreamReader<RequestMessage>,
+        player_id: u32,
         player_token: Token
     ) -> Self
     {
@@ -65,6 +71,8 @@ impl PlayerSupervisor {
         let player_conn = connection_table.open_connection(player_token);
 
         return PlayerSupervisor {
+            player_id,
+            event_bus,
             game_conn,
             player_conn,
             timeouts: TimeoutHeap::new(),
@@ -72,13 +80,14 @@ impl PlayerSupervisor {
         }
     }
 
-    pub fn send_player_request(&mut self, request: SupervisorRequest) {
+    pub fn send_player_request(&mut self, request: &RequestMessage) {
         self.open_requests.insert(request.request_id);
         let deadline = Instant::now() + request.timeout;
         self.timeouts.enqueue(request.request_id, deadline);
         self.player_conn.emit(PlayerRequest {
             request_id: request.request_id,
-            content: request.content,
+            // TODO: don't clone I guess
+            content: request.content.clone(),
         });
     }
 
@@ -86,25 +95,30 @@ impl PlayerSupervisor {
         if !self.open_requests.remove(&response.request_id) {
             return;
         }
-        self.game_conn.emit(SupervisorMsg::Response {
+        self.event_bus.write(GameEvent::PlayerResponse(PlayerResp {
+            player_id: self.player_id,
             request_id: response.request_id,
-            content: response.content,
-        });
+            response: Ok(response.content),
+        }));
     }
 
     pub fn handle_timeout(&mut self, request_id: u32) {
         if !self.open_requests.remove(&request_id) {
             return;
         }
-        self.game_conn.emit(SupervisorMsg::Timeout { request_id })
+        self.event_bus.write(GameEvent::PlayerResponse(PlayerResp {
+            player_id: self.player_id,
+            request_id,
+            response: Err(TimeoutErr),
+        }));
     }
 
     pub fn run(mut self) {
         let task = async move {
             loop {
                 select!(
-                    req = self.game_conn.recv::<SupervisorRequest>() => {
-                        self.send_player_request(req);
+                    req = self.game_conn.recv().fuse() => {
+                        self.send_player_request(&req);
                     }
                     resp = self.player_conn.recv::<PlayerResponse>() => {
                         self.handle_response(resp);

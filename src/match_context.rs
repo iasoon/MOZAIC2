@@ -1,16 +1,30 @@
+use crate::msg_stream::MsgStreamHandle;
 use std::collections::HashMap;
-use futures::future::{select_all, Future, FutureExt, FusedFuture};
+use futures::future::{Future, FutureExt, FusedFuture};
 use std::pin::Pin;
 use futures::task::{Context, Poll};
-use tokio::time::Duration;
-use std::sync::Arc;
 use serde::{Serialize, Deserialize};
+use std::time::{Duration};
+
 
 use crate::connection_table::{Token, ConnectionTableHandle};
-use crate::player_supervisor::{PlayerSupervisor, SupervisorMsg, SupervisorRequest};
+use crate::player_supervisor::{PlayerSupervisor, RequestMessage};
+
+pub enum GameEvent {
+    PlayerResponse(PlayerResponse),
+}
+
+pub struct PlayerResponse {
+    pub player_id: u32,
+    pub request_id: u32,
+    pub response: Result<Vec<u8>, Timeout>,
+}
+
+pub struct Timeout;
 
 pub struct MatchCtx {
-    conn_mgr: ConnectionManager,
+    event_bus: MsgStreamHandle<GameEvent>,
+    player_chans: HashMap<u32, MsgStreamHandle<RequestMessage>>,
     players: HashMap<u32, PlayerData>,
     connection_table: ConnectionTableHandle,
 }
@@ -18,20 +32,23 @@ pub struct MatchCtx {
 impl MatchCtx {
     pub fn new(connection_table: ConnectionTableHandle) -> Self {
         MatchCtx {
-            conn_mgr: ConnectionManager::new(),
+            event_bus: msg_stream(),
+            player_chans: HashMap::new(),
             players: HashMap::new(),
 
             connection_table,
         }
     }
     pub fn create_player(&mut self, player_id: u32, token: Token) {
-        let remote = self.conn_mgr.create_connection(player_id);
+        let stream = msg_stream();
         PlayerSupervisor::create(
             self.connection_table.clone(),
-            remote,
+            self.event_bus.clone(),
+            stream.reader(),
+            player_id,
             token
         ).run();
-
+        self.player_chans.insert(player_id, stream);
         self.players.insert(player_id, PlayerData {
             msg_ctr: 0,
         });
@@ -47,18 +64,16 @@ impl MatchCtx {
         let request_id = player.msg_ctr;
         player.msg_ctr += 1;
 
-        let req = SupervisorRequest {
+        self.player_chans.get_mut(&player_id).unwrap().write(RequestMessage {
             request_id,
             content,
             timeout
-        };
+        });
 
-        self.conn_mgr.send(player_id, &req);
-        let reader = self.conn_mgr.connections[&player_id].rx.clone();
         return Request {
             player_id,
             request_id,
-            reader,
+            event_bus: self.event_bus.reader(),
         };
     }
 
@@ -82,7 +97,7 @@ struct PlayerData {
 pub struct Request {
     player_id: u32,
     request_id: u32,
-    reader: MsgStreamReader<Vec<u8>>,
+    event_bus: MsgStreamReader<GameEvent>,
 }
 
 impl Request {
@@ -98,30 +113,31 @@ impl Future for Request {
         -> Poll<Self::Output>
     {
         loop {
-            let data = ready!(self.reader.recv().poll_unpin(cx));
-            let resp: SupervisorMsg = bincode::deserialize(&data).unwrap();
-            let (request_id, value) = match resp {
-                SupervisorMsg::Response { request_id, content } => {
-                    (request_id, Ok(content))
+            let event = ready!(self.event_bus.recv().poll_unpin(cx));
+            match *event {
+                GameEvent::PlayerResponse(ref resp) => {
+                    if resp.player_id == self.player_id && resp.request_id == self.request_id
+                    {
+                        let value = resp.response.as_ref()
+                            .map(|data| data.clone())
+                            .map_err(|_| RequestError::Timeout);
+                        return Poll::Ready(value);
+                    }
+
                 }
-                SupervisorMsg::Timeout { request_id } => {
-                    (request_id, Err(RequestError::Timeout))
-                }
-            };
-            if request_id == self.request_id {
-                return Poll::Ready(value);
             }
         }
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum RequestError {
     Timeout
 }
 
 pub type RequestResult<T> = Result<T, RequestError>;
 
-use crate::msg_stream::{msg_stream, MsgStreamReader, MsgStreamHandle};
+use crate::msg_stream::{msg_stream, MsgStreamReader};
 
 pub struct Connection {
     pub tx: MsgStreamHandle<Vec<u8>>,
@@ -154,37 +170,5 @@ impl Connection {
         let conn1 = Connection { rx: rx1, tx: tx2};
         let conn2 = Connection { rx: rx2, tx: tx1};
         return (conn1, conn2);
-    }
-}
-
-pub struct ConnectionManager {
-    connections: HashMap<u32, Connection>,
-}
-
-impl ConnectionManager {
-    pub fn new() -> Self {
-        ConnectionManager { connections: HashMap::new() }
-    }
-
-    pub fn create_connection(&mut self, key: u32) -> Connection {
-        let (local, remote) = Connection::create();
-        self.connections.insert(key, local);
-        return remote;
-    }
-
-    pub fn send<T>(&mut self, player_id: u32, message: &T)
-        where T: Serialize
-    {
-        let conn = self.connections.get_mut(&player_id).unwrap();
-        let data = bincode::serialize(message).unwrap();
-        conn.tx.write(data);
-    }
-
-    pub async fn recv(&mut self) -> (u32, Arc<Vec<u8>>) {
-        let i = self.connections.iter_mut().map(|(&id, conn)| {
-            conn.rx.recv().map(move |data| (id, data))
-        });
-        let (value, _, _) = select_all(i).await;
-        return value;
     }
 }
