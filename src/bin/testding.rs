@@ -5,7 +5,7 @@ extern crate rand;
 extern crate futures;
 extern crate bincode;
 
-use mozaic_core::player_manager::Connection;
+use mozaic_core::match_context::Connection;
 use tokio::time::{Duration, sleep};
 use rand::Rng;
 use futures::stream::futures_unordered::FuturesUnordered;
@@ -22,7 +22,7 @@ use mozaic_core::connection_table::{
     ConnectionTableHandle,
 };
 
-use mozaic_core::player_manager::PlayerManager;
+use mozaic_core::match_context::MatchCtx;
 use mozaic_core::websocket::{websocket_server, connect_client};
 use mozaic_core::client_manager::ClientMgrHandle;
 
@@ -89,7 +89,7 @@ async fn run_lobby(
 
     for match_num in 1..=3 {
         println!("match {}", match_num);
-        let mut player_mgr = PlayerManager::new(conn_table.clone());
+        let mut player_mgr = MatchCtx::new(conn_table.clone());
 
         for (player_num, client) in clients.iter_mut().enumerate() {
             let player_token: Token = rand::thread_rng().gen();
@@ -101,20 +101,20 @@ async fn run_lobby(
     }
 }
 
-async fn guessing_game(mut player_handler: PlayerManager) {    
+async fn guessing_game(mut match_ctx: MatchCtx) {    
     let the_number: u8 = rand::thread_rng().gen_range(1, 11);
     println!("the number is {}", the_number);
 
-    let players = player_handler.players();
+    let players = match_ctx.players();
 
-    for turn_num in 1..=10  {
-        println!("round {}", turn_num);
+    for turn_num in 1..=10usize  {
+        match_ctx.emit(format!("round {}", turn_num));
         let guesses = 
             // for every player:
             players.iter()
             // prompt them for their guess
             .map(|&player_id| {
-                player_handler.request(
+                match_ctx.request(
                     player_id,
                     Vec::new(), // no data
                     Duration::from_millis(1000),
@@ -133,13 +133,13 @@ async fn guessing_game(mut player_handler: PlayerManager) {
         for (player_id, resp) in guesses {
             if let Ok(bytes) = resp {
                 let guess = bytes[0];
-                println!("received guess from {}: {}", player_id, guess);
+                match_ctx.emit(format!("received guess from {}: {}", player_id, guess));
                 if guess == the_number {
-                    println!("{} won the game", player_id);
+                    match_ctx.emit(format!("{} won the game", player_id));
                     return;
                 }
             } else {
-                println!("{} timed out", player_id);
+                match_ctx.emit(format!("{} timed out", player_id));
             }
         }
     }

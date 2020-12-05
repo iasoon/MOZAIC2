@@ -8,7 +8,7 @@ use futures::task::{Poll, Context};
 use tokio::sync::mpsc;
 use tokio::net::{TcpListener, TcpStream};
 use crate::connection_table::{Token, ConnectionTableHandle};
-use crate::player_manager::Connection;
+use crate::match_context::Connection;
 use crate::client_manager::{ClientMgrHandle, ClientCtrlMsg};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use serde::{Serialize, Deserialize};

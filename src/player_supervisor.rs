@@ -13,7 +13,7 @@ use tokio::time::{Sleep, Instant, Duration, sleep_until};
 use std::cmp::{Ord, Ordering};
 use std::pin::Pin;
 use futures::task::{Context, Poll};
-use crate::player_manager::Connection;
+use crate::match_context::Connection;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SupervisorRequest {

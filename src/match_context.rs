@@ -9,16 +9,15 @@ use serde::{Serialize, Deserialize};
 use crate::connection_table::{Token, ConnectionTableHandle};
 use crate::player_supervisor::{PlayerSupervisor, SupervisorMsg, SupervisorRequest};
 
-
-pub struct PlayerManager {
+pub struct MatchCtx {
     conn_mgr: ConnectionManager,
     players: HashMap<u32, PlayerData>,
     connection_table: ConnectionTableHandle,
 }
 
-impl PlayerManager {
+impl MatchCtx {
     pub fn new(connection_table: ConnectionTableHandle) -> Self {
-        PlayerManager {
+        MatchCtx {
             conn_mgr: ConnectionManager::new(),
             players: HashMap::new(),
 
@@ -65,6 +64,13 @@ impl PlayerManager {
 
     pub fn players(&self) -> Vec<u32> {
         self.players.keys().cloned().collect()
+    }
+
+    // this method should be used to emit log states etc.
+    // this should place them in chronological relation
+    // to the events that happened.
+    pub fn emit(&mut self, message: String) {
+        println!("{}", message);
     }
 }
 

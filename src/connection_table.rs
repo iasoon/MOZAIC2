@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 
-use crate::player_manager::Connection;
+use crate::match_context::Connection;
 use crate::msg_stream::{msg_stream, MsgStreamHandle};
 
 // TODO: this code sucks. Please help.
