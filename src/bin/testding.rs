@@ -25,6 +25,7 @@ use mozaic_core::connection_table::{
 use mozaic_core::match_context::MatchCtx;
 use mozaic_core::websocket::{websocket_server, connect_client};
 use mozaic_core::client_manager::ClientMgrHandle;
+use mozaic_core::client::runner::Bot;
 
 #[tokio::main]
 async fn main() {
@@ -48,26 +49,28 @@ fn simulate_client(client_token: Token) {
     
         sleep(Duration::from_millis(delay_millis)).await;
 
-        connect_client(url, client_token, simulate_player).await;
+        connect_client(url, client_token, run_player).await;
     });
 }
 
-async fn simulate_player(player_token: Token, mut conn: Connection) {
+
+async fn run_player(player_token: Token, mut conn: Connection) {
+    let bot  = Bot {
+        name: "mycoolbot".to_string(),
+        argv: vec![
+            "python3".to_string(),
+            "testbot.py".to_string(),
+        ],
+    };
+    let mut bot_process = bot.spawn_process();
     loop {
         let req: PlayerRequest = conn.recv().await;
-
-        let think_millis = rand::thread_rng().gen_range(0, 1200);
-        println!("{:02x?} needs to think for {} ms", &player_token[..4], think_millis);
-    
-        sleep(Duration::from_millis(think_millis)).await;
-    
-    
-        let guess: u8 = rand::thread_rng().gen_range(1, 11);
-        println!("{:02x?} is done thinking and guesses {}", &player_token[..4], guess);
+        let resp = bot_process.communicate(&req.content).await;
+        println!("{:02x?} is done thinking and guesses {}", &player_token[..4], resp);
     
         let response = PlayerResponse {
             request_id: req.request_id,
-            content: vec![guess]
+            content: resp.into_bytes(),
         };
 
         conn.emit(response);
@@ -87,7 +90,7 @@ async fn run_lobby(
 
 
 
-    for match_num in 1..=3 {
+    for match_num in 1..=1 {
         println!("match {}", match_num);
         let mut player_mgr = MatchCtx::new(conn_table.clone());
 
@@ -102,7 +105,7 @@ async fn run_lobby(
 }
 
 async fn guessing_game(mut match_ctx: MatchCtx) {    
-    let the_number: u8 = rand::thread_rng().gen_range(1, 11);
+    let the_number: usize = rand::thread_rng().gen_range(1, 11);
     println!("the number is {}", the_number);
 
     let players = match_ctx.players();
@@ -132,7 +135,11 @@ async fn guessing_game(mut match_ctx: MatchCtx) {
 
         for (player_id, resp) in guesses {
             if let Ok(bytes) = resp {
-                let guess = bytes[0];
+                let text = String::from_utf8(bytes)
+                    .expect("received invalid string");
+                let guess = text.parse::<usize>()
+                    .expect("failed to parse guess");
+                    
                 match_ctx.emit(format!("received guess from {}: {}", player_id, guess));
                 if guess == the_number {
                     match_ctx.emit(format!("{} won the game", player_id));

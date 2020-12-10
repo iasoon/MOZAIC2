@@ -12,3 +12,4 @@ pub mod match_context;
 pub mod websocket;
 pub mod msg_stream;
 pub mod client_manager;
+pub mod client;
