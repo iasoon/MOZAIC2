@@ -5,6 +5,7 @@ extern crate rand;
 extern crate futures;
 extern crate bincode;
 
+use mozaic_core::client::client::run_client;
 use mozaic_core::match_context::Connection;
 use tokio::time::{Duration, sleep};
 use rand::Rng;
@@ -23,7 +24,7 @@ use mozaic_core::connection_table::{
 };
 
 use mozaic_core::match_context::MatchCtx;
-use mozaic_core::websocket::{websocket_server, connect_client};
+use mozaic_core::websocket::websocket_server;
 use mozaic_core::client_manager::ClientMgrHandle;
 use mozaic_core::client::runner::Bot;
 
@@ -40,42 +41,6 @@ async fn main() {
     run_lobby(client_manager, conn_table).await
 }
 
-fn simulate_client(client_token: Token) {
-    // run client in background
-    tokio::spawn(async move {
-        let url = "ws://127.0.0.1:8080";
-        let delay_millis = rand::thread_rng().gen_range(0, 3000);
-        println!("delaying client {:02x?} for {} ms", &client_token[..4], delay_millis);
-    
-        sleep(Duration::from_millis(delay_millis)).await;
-
-        connect_client(url, client_token, run_player).await;
-    });
-}
-
-
-async fn run_player(player_token: Token, mut conn: Connection) {
-    let bot  = Bot {
-        name: "mycoolbot".to_string(),
-        argv: vec![
-            "python3".to_string(),
-            "testbot.py".to_string(),
-        ],
-    };
-    let mut bot_process = bot.spawn_process();
-    loop {
-        let req: PlayerRequest = conn.recv().await;
-        let resp = bot_process.communicate(&req.content).await;
-        println!("{:02x?} is done thinking and guesses {}", &player_token[..4], resp);
-    
-        let response = PlayerResponse {
-            request_id: req.request_id,
-            content: resp.into_bytes(),
-        };
-
-        conn.emit(response);
-    }
-}
 
 async fn run_lobby(
     client_mgr: ClientMgrHandle,
@@ -84,7 +49,18 @@ async fn run_lobby(
     let client_tokens: [Token; 2] = rand::thread_rng().gen();
 
     let mut clients = client_tokens.iter().map(|token| {
-        simulate_client(token.clone());
+        let url = "ws://127.0.0.1:8080";
+        let bot = Bot {
+            name: "testbot".to_string(),
+            argv: vec![
+                "python3".to_string(),
+                "testbot.py".to_string(),
+            ]
+        };
+        
+
+        tokio::spawn(run_client(url, token.clone(), bot));
+
         client_mgr.get_client(token)
     }).collect::<Vec<_>>();
 

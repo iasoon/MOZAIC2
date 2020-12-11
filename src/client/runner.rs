@@ -1,7 +1,10 @@
+use crate::player_supervisor::{PlayerRequest, PlayerResponse};
+use crate::match_context::Connection;
 use tokio::process;
 use std::process::Stdio;
 use tokio::io::{Lines, BufReader, AsyncBufReadExt, AsyncWriteExt};
 
+#[derive(Debug, Clone)]
 pub struct Bot {
     pub name: String,
     pub argv: Vec<String>,
@@ -29,6 +32,7 @@ impl Bot {
 }
 
 pub struct BotProcess {
+    #[allow(dead_code)]
     child: process::Child,
     stdin: process::ChildStdin,
     stdout: Lines<BufReader<process::ChildStdout>>,
@@ -41,5 +45,20 @@ impl BotProcess {
         self.stdin.write_u8(b'\n').await.expect("write failed");
         let line = self.stdout.next_line().await.expect("read failed");
         return line.expect("no line found");
+    }
+}
+
+pub async fn run_bot(bot: Bot, mut conn: Connection) {
+    let mut process = bot.spawn_process();
+    loop {
+        let req: PlayerRequest = conn.recv().await;
+        let resp = process.communicate(&req.content).await;
+        
+        let response = PlayerResponse {
+            request_id: req.request_id,
+            content: resp.into_bytes(),
+        };
+
+        conn.emit(response);
     }
 }
