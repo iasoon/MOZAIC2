@@ -1,5 +1,4 @@
-use crate::msg_stream::{MsgStreamHandle, MsgStreamReader};
-use futures::Future;
+use crate::msg_stream::MsgStreamReader;
 use std::collections::HashMap;
 use futures::stream::FusedStream;
 use futures::{Stream, SinkExt, StreamExt, FutureExt};
