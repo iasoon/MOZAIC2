@@ -1,21 +1,18 @@
-// https://doc.rust-lang.org/book/ch02-00-guessing-game-tutorial.html
 extern crate tokio;
 extern crate rand;
 
 extern crate futures;
 extern crate bincode;
+#[macro_use]
+extern crate serde;
+extern crate serde_json;
+extern crate hex;
 
-use mozaic_core::client::client::run_client;
-use mozaic_core::match_context::Connection;
-use tokio::time::{Duration, sleep};
+use std::fs::File;
+use tokio::time::Duration;
 use rand::Rng;
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
-
-use mozaic_core::player_supervisor::{
-    PlayerRequest,
-    PlayerResponse,
-};
 
 use mozaic_core::connection_table::{
     Token,
@@ -26,7 +23,12 @@ use mozaic_core::connection_table::{
 use mozaic_core::match_context::MatchCtx;
 use mozaic_core::websocket::websocket_server;
 use mozaic_core::client_manager::ClientMgrHandle;
-use mozaic_core::client::runner::Bot;
+use hex::FromHex;
+
+#[derive(Serialize, Deserialize, Debug)]
+struct MatchConfig {
+    client_tokens: Vec<String>,
+}
 
 #[tokio::main]
 async fn main() {
@@ -38,46 +40,31 @@ async fn main() {
             client_manager.clone(),
             "127.0.0.1:8080"
         ));
-    run_lobby(client_manager, conn_table).await
+    let file = File::open("match_config.json").unwrap();
+    let match_config = serde_json::from_reader(file).unwrap();
+    run_lobby(client_manager, conn_table, match_config).await
 }
 
 
 async fn run_lobby(
     client_mgr: ClientMgrHandle,
     conn_table: ConnectionTableHandle,
+    match_config: MatchConfig,
 ) {
-    let client_tokens: [Token; 2] = rand::thread_rng().gen();
-
-    let mut clients = client_tokens.iter().map(|token| {
-        let url = "ws://127.0.0.1:8080";
-        let bot = Bot {
-            name: "testbot".to_string(),
-            argv: vec![
-                "python3".to_string(),
-                "testbot.py".to_string(),
-            ]
-        };
-        
-
-        tokio::spawn(run_client(url, token.clone(), bot));
-
-        client_mgr.get_client(token)
+    let mut clients = match_config.client_tokens.iter().map(|token_hex| {
+        let token = Token::from_hex(&token_hex).unwrap();
+        client_mgr.get_client(&token)
     }).collect::<Vec<_>>();
 
+    let mut match_ctx = MatchCtx::new(conn_table.clone());
 
-
-    for match_num in 1..=1 {
-        println!("match {}", match_num);
-        let mut player_mgr = MatchCtx::new(conn_table.clone());
-
-        for (player_num, client) in clients.iter_mut().enumerate() {
-            let player_token: Token = rand::thread_rng().gen();
-            player_mgr.create_player((player_num + 1) as u32, player_token);
-            client.run_player(player_token).await;
-        }
-    
-        guessing_game(player_mgr).await
+    for (player_num, client) in clients.iter_mut().enumerate() {
+        let player_token: Token = rand::thread_rng().gen();
+        match_ctx.create_player((player_num + 1) as u32, player_token);
+        client.run_player(player_token).await;
     }
+
+    guessing_game(match_ctx).await
 }
 
 async fn guessing_game(mut match_ctx: MatchCtx) {    
