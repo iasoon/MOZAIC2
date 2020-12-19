@@ -32,7 +32,7 @@ pub async fn websocket_server(
     addr: &str)
 {
     let try_socket = TcpListener::bind(&addr).await;
-    let listener = try_socket.expect("Failed to bind");
+    let mut listener = try_socket.expect("Failed to bind");
 
     while let Ok((stream, _)) = listener.accept().await {
         tokio::spawn(accept_connection(stream, client_mgr.clone(), connection_table.clone()));

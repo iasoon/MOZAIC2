@@ -11,7 +11,7 @@ use super::connection_table::{
 };
 
 use std::collections::{BinaryHeap, HashSet};
-use tokio::time::{Sleep, Instant, Duration, sleep_until};
+use tokio::time::{Delay, Instant, Duration, delay_until};
 use std::cmp::{Ord, Ordering};
 use std::pin::Pin;
 use futures::task::{Context, Poll};
@@ -167,14 +167,14 @@ impl<T> Ord for Timeout<T> {
 }
 
 struct TimeoutHeap<T> {
-    sleep: Sleep,
+    sleep: Delay,
     heap: BinaryHeap<Timeout<T>>,
 }
 
 impl<T> TimeoutHeap<T> {
     fn new() -> Self {
         TimeoutHeap {
-            sleep: sleep_until(Instant::now()),
+            sleep: delay_until(Instant::now()),
             heap: BinaryHeap::new(),
         }
     }

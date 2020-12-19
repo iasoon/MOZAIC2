@@ -17,6 +17,7 @@ pub struct ConnectionTable {
     connections: HashMap<Token, ConnectionStub>,
 }
 
+// TODO: put this in a central location
 pub type Token = [u8; 32];
 
 impl ConnectionTable {
