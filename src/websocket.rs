@@ -29,7 +29,7 @@ pub enum ClientMessage {
 pub async fn websocket_server(
     connection_table: ConnectionTableHandle,
     client_mgr: ClientMgrHandle,
-    addr: &str)
+    addr: String)
 {
     let try_socket = TcpListener::bind(&addr).await;
     let mut listener = try_socket.expect("Failed to bind");

@@ -14,3 +14,47 @@ pub mod websocket;
 pub mod msg_stream;
 pub mod client_manager;
 pub mod client;
+
+// re-exports
+pub use connection_table::Token;
+pub use match_context::MatchCtx;
+
+use connection_table::{
+    ConnectionTable,
+    ConnectionTableHandle,
+};
+
+
+use websocket::websocket_server;
+use client_manager::{ClientHandle, ClientMgrHandle};
+use futures::Future;
+
+pub struct GameServer {
+    conn_table: ConnectionTableHandle,
+    client_manager: ClientMgrHandle,
+}
+
+impl GameServer {
+    pub fn new() -> Self {
+        let conn_table = ConnectionTable::new();
+        let client_manager = ClientMgrHandle::new();
+        GameServer { conn_table, client_manager }
+    }
+
+    pub fn run_ws_server(&self, addr: String) -> impl Future<Output=()>
+    {
+        websocket_server(
+            self.conn_table.clone(),
+            self.client_manager.clone(),
+            addr
+        )
+    }
+
+    pub fn get_client(&self, token: &Token) -> ClientHandle {
+        self.client_manager.get_client(token)
+    }
+
+    pub fn create_match(&self) -> MatchCtx {
+        MatchCtx::new(self.conn_table.clone())
+    }
+}

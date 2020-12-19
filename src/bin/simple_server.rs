@@ -14,15 +14,7 @@ use rand::Rng;
 use futures::stream::futures_unordered::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 
-use mozaic_core::connection_table::{
-    Token,
-    ConnectionTable,
-    ConnectionTableHandle,
-};
-
-use mozaic_core::match_context::MatchCtx;
-use mozaic_core::websocket::websocket_server;
-use mozaic_core::client_manager::ClientMgrHandle;
+use mozaic_core::{Token, MatchCtx, GameServer};
 use hex::FromHex;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -32,31 +24,25 @@ struct MatchConfig {
 
 #[tokio::main]
 async fn main() {
-    let conn_table = ConnectionTable::new();
-    let client_manager = ClientMgrHandle::new();
-    tokio::spawn(
-        websocket_server(
-            conn_table.clone(),
-            client_manager.clone(),
-            "127.0.0.1:8080"
-        ));
+    let serv = GameServer::new();
+    tokio::spawn(serv.run_ws_server("127.0.0.1:8080".to_string()));
+
     let file = File::open("match_config.json").unwrap();
     let match_config = serde_json::from_reader(file).unwrap();
-    run_lobby(client_manager, conn_table, match_config).await
+    run_lobby(serv, match_config).await
 }
 
 
 async fn run_lobby(
-    client_mgr: ClientMgrHandle,
-    conn_table: ConnectionTableHandle,
+    serv: GameServer,
     match_config: MatchConfig,
 ) {
     let mut clients = match_config.client_tokens.iter().map(|token_hex| {
         let token = Token::from_hex(&token_hex).unwrap();
-        client_mgr.get_client(&token)
+        serv.get_client(&token)
     }).collect::<Vec<_>>();
 
-    let mut match_ctx = MatchCtx::new(conn_table.clone());
+    let mut match_ctx = serv.create_match();
 
     for (player_num, client) in clients.iter_mut().enumerate() {
         let player_token: Token = rand::thread_rng().gen();
