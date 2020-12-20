@@ -27,6 +27,7 @@ pub struct MatchCtx {
     player_chans: HashMap<u32, MsgStreamHandle<RequestMessage>>,
     players: HashMap<u32, PlayerData>,
     connection_table: ConnectionTableHandle,
+    output: MsgStreamHandle<String>,
 }
 
 impl MatchCtx {
@@ -35,6 +36,7 @@ impl MatchCtx {
             event_bus: msg_stream(),
             player_chans: HashMap::new(),
             players: HashMap::new(),
+            output: msg_stream(),
 
             connection_table,
         }
@@ -85,7 +87,11 @@ impl MatchCtx {
     // this should place them in chronological relation
     // to the events that happened.
     pub fn emit(&mut self, message: String) {
-        println!("{}", message);
+        self.output.write(message);
+    }
+
+    pub fn output_stream<'a>(&'a self) -> &'a MsgStreamHandle<String> {
+        &self.output
     }
 }
 
