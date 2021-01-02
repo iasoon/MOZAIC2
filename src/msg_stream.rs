@@ -64,6 +64,11 @@ impl<T> MsgStreamHandle<T> {
         }
     }
 
+    pub fn to_vec(&self) -> Vec<Arc<T>> {
+        let state = self.stream.state_mutex.lock().unwrap();
+        return state.messages.clone();
+    }
+
     pub fn write(&mut self, msg: T) {
         let mut inner = self.stream.state_mutex.lock().unwrap();
         inner.messages.push(Arc::new(msg));
