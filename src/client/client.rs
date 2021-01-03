@@ -1,5 +1,6 @@
 use crate::msg_stream::MsgStreamHandle;
-use crate::websocket::{StreamSet, ServerMessage, ClientMessage};
+use crate::websocket::{ServerMessage, ClientMessage};
+use crate::utils::StreamSet;
 use std::collections::HashMap;
 use crate::msg_stream::MsgStreamReader;
 use tokio_tungstenite::tungstenite::Message as WsMessage;

@@ -14,6 +14,7 @@ pub mod websocket;
 pub mod msg_stream;
 pub mod client_manager;
 pub mod client;
+pub mod utils;
 
 // re-exports
 pub use connection_table::Token;
