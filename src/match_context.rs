@@ -36,6 +36,7 @@ impl MatchCtx {
     pub fn new(
         event_bus: EventBus,
         players: HashMap<u32, MsgStreamHandle<RequestMessage>>,
+        log: MsgStreamHandle<String>,
     ) -> Self
     {
         MatchCtx {
@@ -47,8 +48,7 @@ impl MatchCtx {
                 };
                 (id, player_handle)
             }).collect(),
-            output: msg_stream(),
-
+            output: log,
         }
     }
 

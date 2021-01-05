@@ -51,7 +51,7 @@ async fn run_lobby(
             let player = serv.register_player(player_id, player_token, &event_bus);
             client.run_player(player_token).map(move |_| (player_id, player))
         }).collect().await;
-    let ctx = MatchCtx::new(event_bus, players);
+    let ctx = MatchCtx::new(event_bus, players, msg_stream());
     guessing_game(ctx).await
 }
 
