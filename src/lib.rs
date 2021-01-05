@@ -35,6 +35,7 @@ use websocket::websocket_server;
 use client_manager::{ClientHandle, ClientMgrHandle};
 use futures::Future;
 
+#[derive(Clone)]
 pub struct GameServer {
     conn_table: ConnectionTableHandle,
     client_manager: ClientMgrHandle,
