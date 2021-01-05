@@ -17,6 +17,11 @@ pub mod client;
 pub mod utils;
 
 // re-exports
+use crate::player_supervisor::RequestMessage;
+use crate::msg_stream::MsgStreamHandle;
+use crate::player_supervisor::PlayerSupervisor;
+use crate::msg_stream::msg_stream;
+use crate::match_context::EventBus;
 pub use connection_table::Token;
 pub use match_context::MatchCtx;
 
@@ -55,7 +60,24 @@ impl GameServer {
         self.client_manager.get_client(token)
     }
 
-    pub fn create_match(&self) -> MatchCtx {
-        MatchCtx::new(self.conn_table.clone())
+    // TODO: this part should just go.
+    // the 'gameserver' part entirely handles player/client connections now,
+    // it could totally do time-outs as well.
+    pub fn register_player(
+        &mut self,
+        player_id: u32,
+        player_token: Token,
+        event_bus: &EventBus,
+    ) -> MsgStreamHandle<RequestMessage>
+    {
+        let player_stream = msg_stream();
+        PlayerSupervisor::create(
+            self.conn_table.clone(),
+            event_bus.clone(),
+            player_stream.reader(),
+            player_id,
+            player_token,
+        ).run();
+        return player_stream;
     }
 }

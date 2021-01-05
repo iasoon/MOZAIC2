@@ -22,40 +22,37 @@ pub struct PlayerResponse {
 
 pub struct Timeout;
 
+
+// TODO: replace with a specialized struct
+pub type EventBus = MsgStreamHandle<GameEvent>;
+
 pub struct MatchCtx {
-    event_bus: MsgStreamHandle<GameEvent>,
-    player_chans: HashMap<u32, MsgStreamHandle<RequestMessage>>,
-    players: HashMap<u32, PlayerData>,
-    connection_table: ConnectionTableHandle,
+    event_bus: EventBus,
+    players: HashMap<u32, PlayerHandle>,
     output: MsgStreamHandle<String>,
 }
 
 impl MatchCtx {
-    pub fn new(connection_table: ConnectionTableHandle) -> Self {
+    pub fn new(
+        event_bus: EventBus,
+        players: HashMap<u32, MsgStreamHandle<RequestMessage>>,
+    ) -> Self
+    {
         MatchCtx {
-            event_bus: msg_stream(),
-            player_chans: HashMap::new(),
-            players: HashMap::new(),
+            event_bus,
+            players: players.into_iter().map(|(id, handle)| {
+                let player_handle = PlayerHandle {
+                    msg_ctr: 0,
+                    stream_handle: handle,
+                };
+                (id, player_handle)
+            }).collect(),
             output: msg_stream(),
 
-            connection_table,
         }
     }
-    pub fn create_player(&mut self, player_id: u32, token: Token) {
-        let stream = msg_stream();
-        PlayerSupervisor::create(
-            self.connection_table.clone(),
-            self.event_bus.clone(),
-            stream.reader(),
-            player_id,
-            token
-        ).run();
-        self.player_chans.insert(player_id, stream);
-        self.players.insert(player_id, PlayerData {
-            msg_ctr: 0,
-        });
-    }
 
+    // TODO: implement a clean way to handle the player not existing
     pub fn request(&mut self,
                    player_id: u32,
                    content: Vec<u8>,
@@ -66,7 +63,7 @@ impl MatchCtx {
         let request_id = player.msg_ctr;
         player.msg_ctr += 1;
 
-        self.player_chans.get_mut(&player_id).unwrap().write(RequestMessage {
+        player.stream_handle.write(RequestMessage {
             request_id,
             content,
             timeout
@@ -95,8 +92,9 @@ impl MatchCtx {
     }
 }
 
-struct PlayerData {
+struct PlayerHandle {
     msg_ctr: u32,
+    stream_handle: MsgStreamHandle<RequestMessage>,
 }
 
 
