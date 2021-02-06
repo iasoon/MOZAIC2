@@ -57,6 +57,14 @@ impl GameServer {
         )
     }
 
+    pub fn client_manager(&self) -> &ClientMgrHandle {
+        &self.client_manager
+    }
+
+    pub fn client_manager_mut(&mut self) -> &mut ClientMgrHandle {
+        &mut self.client_manager
+    }
+
     pub fn get_client(&self, token: &Token) -> ClientHandle {
         self.client_manager.get_client(token)
     }

@@ -50,7 +50,8 @@ async fn accept_connection(
 
     let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<ClientCtrlMsg>(10);
 
-    loop {
+    let mut client_tokens = Vec::new();
+    'handle_messages: loop {
         select!(
             item = stream_set.next() => {
                 let (player_token, data) = item.unwrap();
@@ -89,10 +90,11 @@ async fn accept_connection(
                             }
                             ClientMessage::IdentifyClient { client_token } => {
                                 client_mgr.register_client(client_token, ctrl_tx.clone());
+                                client_tokens.push(client_token);
                             }
                         }
                     }
-                    _ => return,
+                    _ => break 'handle_messages,
                 }
             }
             item = ctrl_rx.recv().fuse() => {
@@ -107,5 +109,10 @@ async fn accept_connection(
                 }
             }
         )
+    }
+
+    for token in client_tokens.into_iter() {
+        // TODO: this is not correct when there are multiple connections for a client
+        client_mgr.unregister_client(token);
     }
 }

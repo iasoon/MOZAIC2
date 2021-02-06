@@ -6,9 +6,7 @@ use futures::task::{Context, Poll};
 use serde::{Serialize, Deserialize};
 use std::time::{Duration};
 
-
-use crate::connection_table::{Token, ConnectionTableHandle};
-use crate::player_supervisor::{PlayerSupervisor, RequestMessage};
+use crate::player_supervisor::RequestMessage;
 
 pub enum GameEvent {
     PlayerResponse(PlayerResponse),
