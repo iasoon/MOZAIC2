@@ -98,6 +98,7 @@ async fn guessing_game(mut match_ctx: MatchCtx) {
                 }
             } else {
                 match_ctx.emit(format!("{} timed out", player_id));
+                match_ctx.send_info(player_id, format!("timed out for turn {}", turn_num));
             }
         }
     }

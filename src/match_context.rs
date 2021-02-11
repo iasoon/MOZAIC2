@@ -1,14 +1,10 @@
-use crate::{connection_table::ConnectionTableHandle, msg_stream::MsgStreamHandle};
+use crate::msg_stream::MsgStreamHandle;
 use std::{collections::HashMap, sync::{Arc, Mutex}};
 use futures::{future::{Future, FutureExt, FusedFuture}, task::AtomicWaker};
 use std::pin::Pin;
 use futures::task::{Context, Poll};
 use serde::{Serialize, Deserialize};
 use std::time::{Duration};
-
-pub enum GameEvent {
-    PlayerResponse(PlayerResponse),
-}
 
 pub struct PlayerResponse {
     pub player_id: u32,
@@ -76,6 +72,11 @@ impl MatchCtx {
         };
     }
 
+    pub fn send_info(&mut self, player_id: u32, msg: String) {
+        let player = self.players.get_mut(&player_id).unwrap();
+        player.handle.send_info(msg);
+    }
+
     pub fn players(&self) -> Vec<u32> {
         self.players.keys().cloned().collect()
     }
@@ -92,8 +93,9 @@ impl MatchCtx {
     }
 }
 
-pub trait PlayerHandle {
+pub trait PlayerHandle: Send {
     fn send_request(&mut self, r: RequestMessage);
+    fn send_info(&mut self, msg: String);
 }
 
 struct PlayerData {

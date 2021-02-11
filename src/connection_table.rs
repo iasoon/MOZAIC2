@@ -1,10 +1,10 @@
-use std::{collections::HashMap, unimplemented};
+use std::{collections::HashMap};
 use std::sync::{Arc, Mutex, MutexGuard};
 use futures::FutureExt;
 use tokio::time::delay_for;
 
 
-use crate::match_context::{Connection, EventBus, PlayerHandle, RequestError, RequestMessage};
+use crate::match_context::{EventBus, PlayerHandle, RequestError, RequestMessage};
 use crate::msg_stream::{msg_stream, MsgStreamHandle};
 
 
@@ -29,15 +29,6 @@ impl ConnectionTable {
         return ConnectionTableHandle {
             connection_table: Arc::new(Mutex::new(t))
         };
-    }
-
-    fn conn<'a>(&'a mut self, token: &Token) -> &'a mut ConnectionData {
-        if let Some(conn) = self.connections.get_mut(token) {
-            conn
-        } else {
-            // TODO: remove this
-            panic!("unknown connection {:x?}", token);
-        }
     }
 }
 
@@ -107,7 +98,7 @@ pub struct RemotePlayerHandle {
 impl PlayerHandle for RemotePlayerHandle {
     fn send_request(&mut self, r: RequestMessage) {
         let player_req = PlayerRequest { request_id: r.request_id, content: r.content };
-        let data = bincode::serialize(&player_req).unwrap();
+        let data = bincode::serialize(&ServerMessage::Request(player_req)).unwrap();
         self.messages.write(data);
 
         let req_id = (self.player_id, r.request_id);
@@ -116,12 +107,23 @@ impl PlayerHandle for RemotePlayerHandle {
             bus.lock().unwrap().resolve_request(req_id, Err(RequestError::Timeout))
         }));
     }
+
+    fn send_info(&mut self, msg: String) {
+        let data = bincode::serialize(&ServerMessage::Info(msg)).unwrap();
+        self.messages.write(data);
+    }
 }
 
 impl Drop for RemotePlayerHandle {
     fn drop(&mut self) {
         self.conn_table.lock().connections.remove(&self.token);
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum ServerMessage {
+    Request(PlayerRequest),
+    Info(String),
 }
 
 #[derive(Serialize, Deserialize, Debug)]

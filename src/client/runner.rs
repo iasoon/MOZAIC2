@@ -1,4 +1,4 @@
-use crate::{connection_table::{PlayerRequest, PlayerResponse}, match_context::Connection};
+use crate::{connection_table::{PlayerResponse, ServerMessage}, match_context::Connection};
 use tokio::process;
 use std::process::Stdio;
 use tokio::io::{Lines, BufReader, AsyncBufReadExt, AsyncWriteExt};
@@ -50,14 +50,21 @@ impl BotProcess {
 pub async fn run_bot(bot: Bot, mut conn: Connection) {
     let mut process = bot.spawn_process();
     loop {
-        let req: PlayerRequest = conn.recv().await;
-        let resp = process.communicate(&req.content).await;
+        let msg: ServerMessage = conn.recv().await;
+        match msg {
+            ServerMessage::Request(req) => {
+                let resp = process.communicate(&req.content).await;
         
-        let response = PlayerResponse {
-            request_id: req.request_id,
-            content: resp.into_bytes(),
-        };
-
-        conn.emit(response);
+                let response = PlayerResponse {
+                    request_id: req.request_id,
+                    content: resp.into_bytes(),
+                };
+        
+                conn.emit(response);        
+            }
+            ServerMessage::Info(msg) => {
+                eprintln!("INFO: {}", msg);
+            }
+        }
     }
 }
