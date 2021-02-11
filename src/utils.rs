@@ -26,7 +26,7 @@ impl<K, S> Stream for StreamSet<K, S>
     where S: Stream + Unpin,
           K: Clone + Unpin,
 {
-    type Item = (K, S::Item);
+    type Item = (K, Option<S::Item>);
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>)
         -> Poll<Option<Self::Item>>
@@ -35,11 +35,13 @@ impl<K, S> Stream for StreamSet<K, S>
         let res = ready!(inner.poll_next_unpin(cx));
         match res {
             None => return Poll::Pending,
-            Some((None, _stream)) => return Poll::Pending,
+            Some((None, stream)) => {
+                return Poll::Ready(Some((stream.key, None)));
+            }
             Some((Some(item), stream)) => {
                 let key = stream.key.clone();
                 inner.push(stream.into_future());
-                return Poll::Ready(Some((key, item)));
+                return Poll::Ready(Some((key, Some(item))));
             }
         }
     }

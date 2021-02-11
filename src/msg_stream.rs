@@ -4,13 +4,14 @@ use futures::task::{Context, Poll};
 use futures::FutureExt;
 use futures::{Future, Stream};
 use futures::task::AtomicWaker;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
 
 // TODO: restructure this code for a bit
 
 pub fn msg_stream<T>() -> MsgStreamHandle<T> {
     let stream = Arc::new(MsgStream {
         msg_count: AtomicUsize::new(0),
+        is_terminated: AtomicBool::new(false),
         state_mutex: Mutex::new(InnerState {
             messages: Vec::new(),
             wakers: Vec::new(),
@@ -31,6 +32,7 @@ pub struct InnerState<T> {
 struct MsgStream<T> {
     state_mutex: Mutex<InnerState<T>>,
     msg_count: AtomicUsize,
+    is_terminated: AtomicBool,
 }
 
 pub struct MsgStreamHandle<T> {
@@ -71,8 +73,19 @@ impl<T> MsgStreamHandle<T> {
 
     pub fn write(&mut self, msg: T) {
         let mut inner = self.stream.state_mutex.lock().unwrap();
+        if self.stream.is_terminated.load(Ordering::Relaxed) {
+            panic!("writing to a terminated stream");
+        }
         inner.messages.push(Arc::new(msg));
         self.stream.msg_count.store(inner.messages.len(), Ordering::Relaxed);
+        for (_id, waker) in inner.wakers.iter() {
+            waker.wake();
+        }
+    }
+
+    pub fn terminate(&mut self) {
+        let inner = self.stream.state_mutex.lock().unwrap();
+        self.stream.is_terminated.store(true, Ordering::Relaxed);
         for (_id, waker) in inner.wakers.iter() {
             waker.wake();
         }
@@ -105,7 +118,6 @@ impl<T> MsgStreamReader<T> {
 }
 
 impl<T> Drop for MsgStreamReader<T> {
-    
     fn drop(&mut self) {
         let mut inner = self.stream_handle.stream.state_mutex.lock().unwrap();
         inner.wakers.retain(|(id, _)| id != &self.reader_id);
@@ -118,7 +130,7 @@ impl<T> Stream for MsgStreamReader<T> {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>)
         -> Poll<Option<Self::Item>>
     {
-        self.recv().poll_unpin(cx).map(|item| Some(item))
+        self.recv().poll_unpin(cx)
     }
 }
 
@@ -127,7 +139,7 @@ pub struct Recv<'s, T> {
 }
 
 impl<'s, T> Future for Recv<'s, T> {
-    type Output = Arc<T>;
+    type Output = Option<Arc<T>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>
     {
@@ -141,10 +153,18 @@ impl<'s, T> Future for Recv<'s, T> {
                 .stream.state_mutex.lock().unwrap();
             let value = inner.messages[reader.pos].clone();
             reader.pos += 1;
-            Poll::Ready(value)
-        } else {
-            reader.waker.register(cx.waker());
-            Poll::Pending
+            return Poll::Ready(Some(value));
         }
+
+        let terminated = reader.stream_handle.stream.is_terminated
+            .load(Ordering::Relaxed);
+
+        if terminated {
+            return Poll::Ready(None);
+        }
+
+        // else, register waker and wait
+        reader.waker.register(cx.waker());
+        return Poll::Pending;
     }
 }

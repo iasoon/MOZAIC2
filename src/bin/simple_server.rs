@@ -8,8 +8,8 @@ extern crate serde;
 extern crate serde_json;
 extern crate hex;
 
-use mozaic_core::msg_stream::msg_stream;
-use std::fs::File;
+use mozaic_core::{EventBus, match_context::PlayerHandle, msg_stream::msg_stream};
+use std::{fs::File, sync::{Arc, Mutex}};
 use tokio::time::Duration;
 use rand::Rng;
 use futures::stream::futures_unordered::FuturesUnordered;
@@ -35,7 +35,7 @@ async fn main() {
 
 
 async fn run_lobby(
-    mut serv: GameServer,
+    serv: GameServer,
     match_config: MatchConfig,
 ) {
     let mut clients = match_config.client_tokens.iter().map(|token_hex| {
@@ -43,13 +43,13 @@ async fn run_lobby(
         serv.get_client(&token)
     }).collect::<Vec<_>>();
 
-    let event_bus = msg_stream();
+    let event_bus = Arc::new(Mutex::new(EventBus::new()));
     let players = stream::iter(clients.iter_mut().enumerate())
         .then(|(client_num, client)| {
             let player_id = (client_num + 1) as u32;
             let player_token: Token = rand::thread_rng().gen();
-            let player = serv.register_player(player_id, player_token, &event_bus);
-            client.run_player(player_token).map(move |_| (player_id, player))
+            let player = serv.conn_table().open_connection(player_token, player_id, event_bus.clone());
+            client.run_player(player_token).map(move |_| (player_id, Box::new(player) as Box<dyn PlayerHandle>))
         }).collect().await;
     let ctx = MatchCtx::new(event_bus, players, msg_stream());
     guessing_game(ctx).await

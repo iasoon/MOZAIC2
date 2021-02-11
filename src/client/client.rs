@@ -52,19 +52,26 @@ pub async fn run_client<F, T>(url: &str, client_token: Token, mut run_player: F)
                         let msg = ClientMessage::ConnectPlayer { player_token };
                         let ws_msg = WsMessage::from(bincode::serialize(&msg).unwrap());
                         ws_stream.send(ws_msg).await.unwrap();
-                    } 
+                    }
+                    ServerMessage::TerminatePlayer { player_token } => {
+                        let stream = writers.remove(&player_token);
+                        if let Some(mut s) = stream {
+                            s.terminate();
+                        }
+                    }
                 }
             }
             item = stream_set.next() => {
-                let (player_token, data) = item.unwrap();
-                
-                // Forward message to server
-                let msg = ClientMessage::PlayerMessage {
-                    player_token,
-                    data: data.as_ref().clone(),
-                };
-                let ws_msg = WsMessage::from(bincode::serialize(&msg).unwrap());
-                ws_stream.send(ws_msg).await.unwrap();
+                let (player_token, stream_item) = item.unwrap();
+                if let Some(data) = stream_item {
+                    // Forward message to server
+                    let msg = ClientMessage::PlayerMessage {
+                        player_token,
+                        data: data.as_ref().clone(),
+                    };
+                    let ws_msg = WsMessage::from(bincode::serialize(&msg).unwrap());
+                    ws_stream.send(ws_msg).await.unwrap();
+                }
             }
         );
     }

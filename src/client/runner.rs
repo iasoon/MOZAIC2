@@ -1,5 +1,4 @@
-use crate::player_supervisor::{PlayerRequest, PlayerResponse};
-use crate::match_context::Connection;
+use crate::{connection_table::{PlayerRequest, PlayerResponse}, match_context::Connection};
 use tokio::process;
 use std::process::Stdio;
 use tokio::io::{Lines, BufReader, AsyncBufReadExt, AsyncWriteExt};

@@ -1,19 +1,18 @@
 use crate::utils::StreamSet;
 use crate::msg_stream::MsgStreamReader;
-use std::collections::HashMap;
 use futures::{ SinkExt, StreamExt, FutureExt};
 use tokio::sync::mpsc;
 use tokio::net::{TcpListener, TcpStream};
 use crate::connection_table::{Token, ConnectionTableHandle};
-use crate::match_context::Connection;
 use crate::client_manager::{ClientMgrHandle, ClientCtrlMsg};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ServerMessage {
-    PlayerMessage { player_token: Token, data: Vec<u8> },
     RunPlayer { player_token: Token },
+    PlayerMessage { player_token: Token, data: Vec<u8> },
+    TerminatePlayer { player_token: Token },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -46,18 +45,23 @@ async fn accept_connection(
         .fuse();
 
     let mut stream_set: StreamSet<Token, MsgStreamReader<Vec<u8>>> = StreamSet::new();
-    let mut writers = HashMap::new();
-
     let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<ClientCtrlMsg>(10);
 
     let mut client_tokens = Vec::new();
     'handle_messages: loop {
         select!(
             item = stream_set.next() => {
-                let (player_token, data) = item.unwrap();
-                let msg = ServerMessage::PlayerMessage {
-                    player_token,
-                    data: data.as_ref().clone()
+                let (player_token, stream_item) = item.unwrap();
+                let msg = match stream_item {
+                    Some(data) => {
+                        ServerMessage::PlayerMessage {
+                            player_token,
+                            data: data.as_ref().clone()
+                        }
+                    }
+                    None => {
+                        ServerMessage::TerminatePlayer { player_token }
+                    }
                 };
                 let ws_msg = WsMessage::from(bincode::serialize(&msg).unwrap());
                 ws_stream.send(ws_msg).await.unwrap();
@@ -68,25 +72,12 @@ async fn accept_connection(
                         let client_msg: ClientMessage = bincode::deserialize(&msg.into_data()).unwrap();
                         match client_msg {
                             ClientMessage::ConnectPlayer { player_token } => {
-                                let c = conn_table.connect(&player_token);
-
-                                // TODO: don't panic
-                                // AND BREAK THIS FUNCTION UP JESUS
-                                let Connection { tx, rx } = match c {
-                                    Some(conn) => conn,
-                                    None => panic!("no such connection"),
-                                };
-
-                                stream_set.push(player_token, rx);
-                                writers.insert(player_token, tx);
-
+                                if let Some(msg_stream) = conn_table.messages_for(&player_token) {
+                                    stream_set.push(player_token, msg_stream.reader());
+                                }
                             }
                             ClientMessage::PlayerMessage { player_token, data } => {
-                                if let Some(tx) = writers.get_mut(&player_token) {
-                                    tx.write(data);
-                                } else {
-                                    eprintln!("got message for unregistered player {:x?}", player_token);
-                                }
+                                conn_table.receive(player_token, data);
                             }
                             ClientMessage::IdentifyClient { client_token } => {
                                 client_mgr.register_client(client_token, ctrl_tx.clone());

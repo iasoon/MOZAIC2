@@ -7,7 +7,6 @@ extern crate futures;
 extern crate bincode;
 extern crate tokio_tungstenite;
 
-pub mod player_supervisor;
 pub mod connection_table;
 pub mod match_context;
 pub mod websocket;
@@ -16,14 +15,12 @@ pub mod client_manager;
 pub mod client;
 pub mod utils;
 
+use std::sync::{Arc, Mutex};
+
 // re-exports
-use crate::player_supervisor::RequestMessage;
-use crate::msg_stream::MsgStreamHandle;
-use crate::player_supervisor::PlayerSupervisor;
-use crate::msg_stream::msg_stream;
-use crate::match_context::EventBus;
+pub use crate::msg_stream::MsgStreamHandle;
 pub use connection_table::Token;
-pub use match_context::MatchCtx;
+pub use match_context::{MatchCtx, EventBus};
 
 use connection_table::{
     ConnectionTable,
@@ -56,6 +53,10 @@ impl GameServer {
             addr
         )
     }
+    
+    pub fn conn_table(&self) -> ConnectionTableHandle {
+        self.conn_table.clone()
+    }
 
     pub fn client_manager(&self) -> &ClientMgrHandle {
         &self.client_manager
@@ -74,19 +75,10 @@ impl GameServer {
     // it could totally do time-outs as well.
     pub fn register_player(
         &mut self,
-        player_id: u32,
         player_token: Token,
-        event_bus: &EventBus,
-    ) -> MsgStreamHandle<RequestMessage>
-    {
-        let player_stream = msg_stream();
-        PlayerSupervisor::create(
-            self.conn_table.clone(),
-            event_bus.clone(),
-            player_stream.reader(),
-            player_id,
-            player_token,
-        ).run();
-        return player_stream;
+        player_id: u32,
+        event_bus: Arc<Mutex<EventBus>>,
+    ) {
+        self.conn_table.open_connection(player_token, player_id, event_bus);
     }
 }
