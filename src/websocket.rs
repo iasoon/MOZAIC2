@@ -63,13 +63,13 @@ async fn accept_connection(
                         ServerMessage::TerminatePlayer { player_token }
                     }
                 };
-                let ws_msg = WsMessage::from(bincode::serialize(&msg).unwrap());
+                let ws_msg = WsMessage::from(rmp_serde::to_vec(&msg).unwrap());
                 ws_stream.send(ws_msg).await.unwrap();
             }
             ws_msg = ws_stream.next() => {
                 match ws_msg {
                     Some(Ok(msg)) => {
-                        let client_msg: ClientMessage = bincode::deserialize(&msg.into_data()).unwrap();
+                        let client_msg: ClientMessage = rmp_serde::from_read_ref(&msg.into_data()).unwrap();
                         match client_msg {
                             ClientMessage::ConnectPlayer { player_token } => {
                                 if let Some(msg_stream) = conn_table.messages_for(&player_token) {
@@ -94,7 +94,7 @@ async fn accept_connection(
                 match ctrl_msg {
                     ClientCtrlMsg::StartPlayer { player_token } => {
                         let msg = ServerMessage::RunPlayer { player_token };
-                        let ws_msg = WsMessage::from(bincode::serialize(&msg).unwrap());
+                        let ws_msg = WsMessage::from(rmp_serde::to_vec(&msg).unwrap());
                         ws_stream.send(ws_msg).await.unwrap();
                     }
                 }

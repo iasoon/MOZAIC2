@@ -2,7 +2,7 @@ extern crate tokio;
 extern crate rand;
 
 extern crate futures;
-extern crate bincode;
+extern crate rmp_serde;
 #[macro_use]
 extern crate serde;
 extern crate serde_json;
@@ -55,7 +55,7 @@ async fn run_lobby(
     guessing_game(ctx).await
 }
 
-async fn guessing_game(mut match_ctx: MatchCtx) {    
+async fn guessing_game(mut match_ctx: MatchCtx) {
     let the_number: usize = rand::thread_rng().gen_range(1, 11);
     println!("the number is {}", the_number);
 
@@ -63,7 +63,7 @@ async fn guessing_game(mut match_ctx: MatchCtx) {
 
     for turn_num in 1..=10usize  {
         match_ctx.emit(format!("round {}", turn_num));
-        let guesses = 
+        let guesses =
             // for every player:
             players.iter()
             // prompt them for their guess
@@ -90,7 +90,7 @@ async fn guessing_game(mut match_ctx: MatchCtx) {
                     .expect("received invalid string");
                 let guess = text.parse::<usize>()
                     .expect("failed to parse guess");
-                    
+
                 match_ctx.emit(format!("received guess from {}: {}", player_id, guess));
                 if guess == the_number {
                     match_ctx.emit(format!("{} won the game", player_id));

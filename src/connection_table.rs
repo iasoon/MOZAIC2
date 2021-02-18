@@ -41,7 +41,7 @@ impl ConnectionTableHandle {
     fn lock<'a>(&'a mut self) -> MutexGuard<'a, ConnectionTable> {
         self.connection_table.lock().unwrap()
     }
-    
+
     pub fn receive(&mut self, token: Token, data: Vec<u8>) {
         // TODO: properly handle errors
         let table = self.lock();
@@ -52,7 +52,7 @@ impl ConnectionTableHandle {
                 return
             }
         };
-        let req: PlayerResponse = match bincode::deserialize(&data) {
+        let req: PlayerResponse = match rmp_serde::from_read_ref(&data) {
             Ok(req ) => req,
             Err(err) => return eprintln!("{}", err),
         };
@@ -98,7 +98,7 @@ pub struct RemotePlayerHandle {
 impl PlayerHandle for RemotePlayerHandle {
     fn send_request(&mut self, r: RequestMessage) {
         let player_req = PlayerRequest { request_id: r.request_id, content: r.content };
-        let data = bincode::serialize(&ServerMessage::Request(player_req)).unwrap();
+        let data = rmp_serde::to_vec(&ServerMessage::Request(player_req)).unwrap();
         self.messages.write(data);
 
         let req_id = (self.player_id, r.request_id);
@@ -109,7 +109,7 @@ impl PlayerHandle for RemotePlayerHandle {
     }
 
     fn send_info(&mut self, msg: String) {
-        let data = bincode::serialize(&ServerMessage::Info(msg)).unwrap();
+        let data = rmp_serde::to_vec(&ServerMessage::Info(msg)).unwrap();
         self.messages.write(data);
     }
 }
@@ -134,6 +134,6 @@ pub struct PlayerRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PlayerResponse {
-    pub request_id: u32,
     pub content: Vec<u8>,
+    pub request_id: u32,
 }

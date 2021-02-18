@@ -183,7 +183,7 @@ impl Connection {
     pub fn emit<T>(&mut self, message: T)
         where T: Serialize
     {
-        let encoded = bincode::serialize(&message).unwrap();
+        let encoded = rmp_serde::to_vec(&message).unwrap();
         self.tx.write(encoded);
     }
 
@@ -191,7 +191,8 @@ impl Connection {
         where T: for<'b> Deserialize<'b>
     {
         self.rx.recv().map(|data| {
-            bincode::deserialize(&data.unwrap()).unwrap()
+            let data: &Vec<u8> = &data.unwrap();
+            rmp_serde::from_read_ref(&data).unwrap()
         })
     }
 }
