@@ -1,7 +1,7 @@
 use std::{collections::HashMap};
 use std::sync::{Arc, Mutex, MutexGuard};
 use futures::FutureExt;
-use tokio::time::delay_for;
+use tokio::time::sleep;
 
 
 use crate::match_context::{EventBus, PlayerHandle, RequestError, RequestMessage};
@@ -103,7 +103,7 @@ impl PlayerHandle for RemotePlayerHandle {
 
         let req_id = (self.player_id, r.request_id);
         let bus = self.event_bus.clone();
-        tokio::spawn(delay_for(r.timeout).map(move |_| {
+        tokio::spawn(sleep(r.timeout).map(move |_| {
             bus.lock().unwrap().resolve_request(req_id, Err(RequestError::Timeout))
         }));
     }

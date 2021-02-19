@@ -2,9 +2,7 @@
 use futures::stream::{StreamFuture, FusedStream, StreamExt};
 use std::task::{Context, Poll};
 use std::pin::Pin;
-use tokio::stream::Stream;
-use futures::stream::FuturesUnordered;
-
+use futures::stream::{Stream, FuturesUnordered};
 pub struct StreamSet<K, S> {
     inner: FuturesUnordered<StreamFuture<StreamSetEntry<K, S>>>,
 }

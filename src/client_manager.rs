@@ -117,7 +117,7 @@ impl ClientHandle {
     }
 
     pub async fn run_player(&mut self, player_token: Token) {
-        let mut tx = self.request_tx().await;
+        let tx = self.request_tx().await;
         tx.send(ClientCtrlMsg::StartPlayer { player_token }).await
             .unwrap_or_else(|_| panic!("client channel broke"))
     }
