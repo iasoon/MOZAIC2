@@ -21,7 +21,7 @@ pub async fn run_client<F, T>(url: &str, client_token: Token, mut run_player: F)
 
     // subscribe to connection
     let t_msg = ClientMessage::IdentifyClient { client_token };
-    let ws_msg = WsMessage::from(bincode::serialize(&t_msg).unwrap());
+    let ws_msg = WsMessage::from(rmp_serde::to_vec(&t_msg).unwrap());
     ws_stream.send(ws_msg).await.unwrap();
 
     let mut stream_set: StreamSet<Token, MsgStreamReader<_>> = StreamSet::new();
@@ -30,10 +30,10 @@ pub async fn run_client<F, T>(url: &str, client_token: Token, mut run_player: F)
     loop {
         select!(
             ws_msg = ws_stream.next() => {
-                let msg = bincode::deserialize(
+                let msg = rmp_serde::from_read_ref(
                     &ws_msg.unwrap().unwrap().into_data()
                 ).unwrap();
-                
+
                 match msg {
                     ServerMessage::PlayerMessage { player_token, data } => {
                         if let Some(tx) = writers.get_mut(&player_token) {
@@ -46,11 +46,11 @@ pub async fn run_client<F, T>(url: &str, client_token: Token, mut run_player: F)
                         let (up, down) = Connection::create();
                         stream_set.push(player_token, up.rx);
                         writers.insert(player_token, up.tx);
-                        
+
                         // run player in background
                         tokio::spawn(run_player(player_token, down));
                         let msg = ClientMessage::ConnectPlayer { player_token };
-                        let ws_msg = WsMessage::from(bincode::serialize(&msg).unwrap());
+                        let ws_msg = WsMessage::from(rmp_serde::to_vec(&msg).unwrap());
                         ws_stream.send(ws_msg).await.unwrap();
                     }
                     ServerMessage::TerminatePlayer { player_token } => {
@@ -69,7 +69,7 @@ pub async fn run_client<F, T>(url: &str, client_token: Token, mut run_player: F)
                         player_token,
                         data: data.as_ref().clone(),
                     };
-                    let ws_msg = WsMessage::from(bincode::serialize(&msg).unwrap());
+                    let ws_msg = WsMessage::from(rmp_serde::to_vec(&msg).unwrap());
                     ws_stream.send(ws_msg).await.unwrap();
                 }
             }

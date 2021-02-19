@@ -4,7 +4,7 @@ extern crate tokio;
 extern crate serde;
 #[macro_use]
 extern crate futures;
-extern crate bincode;
+extern crate rmp_serde;
 extern crate tokio_tungstenite;
 
 pub mod connection_table;
@@ -53,7 +53,7 @@ impl GameServer {
             addr
         )
     }
-    
+
     pub fn conn_table(&self) -> ConnectionTableHandle {
         self.conn_table.clone()
     }
