@@ -1,5 +1,5 @@
 use crate::client::runner::{Bot, run_bot};
-use super::client::run_client;
+use super::client::{run_client, connect_ws};
 use crate::connection_table::Token;
 
 // TODO
@@ -20,7 +20,12 @@ pub async fn simple_client(params: ClientParams) {
         argv: params.argv,
     };
 
-    run_client(&params.server, params.token, move |_token, conn| {
+
+    let ws_conn = connect_ws(&params.server)
+        .await
+        .expect("failed to connect to server");
+    println!("connected to server");
+    run_client(ws_conn, params.token, move |_token, conn| {
         run_bot(bot.clone(), conn)
     }).await;
 }

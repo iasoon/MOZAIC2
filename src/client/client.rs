@@ -1,23 +1,29 @@
 use crate::msg_stream::MsgStreamHandle;
 use crate::websocket::{ServerMessage, ClientMessage};
 use crate::utils::StreamSet;
-use std::collections::HashMap;
+use std::{collections::HashMap};
 use crate::msg_stream::MsgStreamReader;
+use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use futures::{Future, StreamExt, SinkExt};
 use crate::match_context::Connection;
 use crate::connection_table::Token;
 
+pub type WsStream = tokio_tungstenite::WebSocketStream<TcpStream>;
+pub type WsErr = tokio_tungstenite::tungstenite::Error;
+
+pub async fn connect_ws(url: &str) -> Result<WsStream, WsErr> {
+    tokio_tungstenite::connect_async(url)
+        .await
+        .map(|(ws_stream, _)| ws_stream)
+}
+
 // yeeted from websocket code for now
-pub async fn run_client<F, T>(url: &str, client_token: Token, mut run_player: F)
+pub async fn run_client<F, T>(ws_stream: WsStream, client_token: Token, mut run_player: F)
     where F: Send + 'static + FnMut(Token, Connection) -> T,
           T: Future<Output=()> + Send + 'static
 {
-    let (ws_stream, _) = tokio_tungstenite::connect_async(url)
-        .await
-        .expect("Failed to connect");
     let mut ws_stream = ws_stream.fuse();
-
 
     // subscribe to connection
     let t_msg = ClientMessage::IdentifyClient { client_token };
