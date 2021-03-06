@@ -40,9 +40,13 @@ async fn accept_connection(
     mut client_mgr: ClientMgrHandle,
     mut conn_table: ConnectionTableHandle)
 {
-    let mut ws_stream = tokio_tungstenite::accept_async(stream).await
-        .expect("Error during the websocket handshake occurred")
-        .fuse();
+    let mut ws_stream = match tokio_tungstenite::accept_async(stream).await {
+        Ok(ws_stream) => ws_stream.fuse(),
+        Err(error) => {
+            eprint!("error during websocket handshake: {}", error);
+            return;
+        }
+    };
 
     let mut stream_set: StreamSet<Token, MsgStreamReader<Vec<u8>>> = StreamSet::new();
     let (ctrl_tx, mut ctrl_rx) = mpsc::channel::<ClientCtrlMsg>(10);
