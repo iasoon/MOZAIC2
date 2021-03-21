@@ -5,7 +5,6 @@ use tokio::io::{Lines, BufReader, AsyncBufReadExt, AsyncWriteExt};
 
 #[derive(Debug, Clone)]
 pub struct Bot {
-    pub name: String,
     pub argv: Vec<String>,
 }
 

@@ -16,7 +16,6 @@ pub struct ClientParams {
 
 pub async fn simple_client(params: ClientParams) {
     let bot = Bot {
-        name: String::from(""),
         argv: params.argv,
     };
 
