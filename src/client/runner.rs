@@ -36,7 +36,6 @@ pub struct BotProcess {
     stdout: Lines<BufReader<process::ChildStdout>>,
 }
 
-
 impl BotProcess {
     pub async fn communicate(&mut self, input: &[u8]) -> String {
         self.stdin.write_all(input).await.expect("write failed");

@@ -38,13 +38,13 @@ async fn run_lobby(
     serv: GameServer,
     match_config: MatchConfig,
 ) {
-    let mut clients = match_config.client_tokens.iter().map(|token_hex| {
+    let clients = match_config.client_tokens.iter().map(|token_hex| {
         let token = Token::from_hex(&token_hex).unwrap();
         serv.get_client(&token)
     }).collect::<Vec<_>>();
 
     let event_bus = Arc::new(Mutex::new(EventBus::new()));
-    let players = stream::iter(clients.iter_mut().enumerate())
+    let players = stream::iter(clients.into_iter().enumerate())
         .then(|(client_num, client)| {
             let player_id = (client_num + 1) as u32;
             let player_token: Token = rand::thread_rng().gen();
